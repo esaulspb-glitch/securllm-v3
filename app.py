@@ -182,11 +182,11 @@ def upload_file_to_gigachat(file_bytes, file_name, api_key):
     auth_response.raise_for_status()
     access_token = auth_response.json().get("access_token")
 
-    # 2. Загружаем файл
+    # 2. Загружаем файл с параметром purpose
     upload_url = "https://api.giga.chat/v1/files"
     headers = {"Authorization": f"Bearer {access_token}"}
     
-    # Обязательный параметр purpose
+    # Обязательный параметр purpose="general"
     data = {"purpose": "general"}
     files = {"file": (file_name, file_bytes, "image/png")}
 
@@ -224,28 +224,38 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
         "Content-Type": "application/json"
     }
 
+    # attachments — массив строк с ID файлов
     payload = {
         "model": "GigaChat-2-Pro",
         "messages": [
             {
                 "role": "user",
                 "content": prompt,
-                "attachments": [file_id]  # МАССИВ СТРОК с ID файла
+                "attachments": [file_id]
             }
         ],
         "temperature": 0.2,
         "max_tokens": 2000
     }
 
-    response = requests.post(chat_url, headers=headers, json=payload, timeout=120, verify=False)
-    response.raise_for_status()
-    result = response.json()
-    return result["choices"][0]["message"]["content"]
+    try:
+        response = requests.post(chat_url, headers=headers, json=payload, timeout=120, verify=False)
+        response.raise_for_status()
+        result = response.json()
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"]
+        else:
+            return f"Неожиданный формат ответа: {result}"
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP ошибка: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.text_area("Тело ответа сервера:", e.response.text, height=200)
+        raise
 
 def recognize_floor_plan(image_bytes, api_key):
     """
     Распознаёт план помещения: загружает изображение, отправляет запрос с file_id.
-    Возвращает список помещений с параметрами.
+    Возвращает список помещений с параметрами (нормализованными).
     """
     prompt = """
 Ты — эксперт по анализу архитектурных планов.
@@ -271,8 +281,11 @@ def recognize_floor_plan(image_bytes, api_key):
     try:
         # 1. Загружаем файл
         file_id = upload_file_to_gigachat(image_bytes, "floor_plan.png", api_key)
+        st.info(f"✅ Файл загружен, ID: {file_id}")
+
         # 2. Отправляем запрос с file_id
         response_text = call_gigachat_vision_with_file(prompt, file_id, api_key)
+
         # 3. Парсим JSON
         import re
         json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
@@ -280,13 +293,45 @@ def recognize_floor_plan(image_bytes, api_key):
             rooms = json.loads(json_match.group())
         else:
             rooms = json.loads(response_text)
+
+        if not isinstance(rooms, list):
+            st.error("Ответ не является массивом")
+            st.text_area("Сырой ответ:", response_text, height=200)
+            return []
+
+        # 4. Нормализация данных: добавляем недостающие поля
+        default_room = {
+            "height": 3.0,
+            "floor": 1,
+            "occupancy": 0,
+            "has_valuables": False,
+            "is_critical": False,
+            "fire_category": "В",
+            "has_suspended": False,
+            "has_beams": False
+        }
+        for room in rooms:
+            for key, value in default_room.items():
+                if key not in room or room[key] is None:
+                    room[key] = value
+            # Вычисляем area
+            if "length" in room and "width" in room and room["length"] and room["width"]:
+                room["area"] = room["length"] * room["width"]
+            else:
+                room["area"] = 0
+            # Преобразуем двери и окна в int
+            room["doors"] = int(room.get("doors", 0) or 0)
+            room["windows"] = int(room.get("windows", 0) or 0)
         return rooms
+
     except json.JSONDecodeError as e:
         st.error(f"Ошибка парсинга JSON: {e}")
-        st.text_area("Сырой ответ модели (не JSON):", response_text if 'response_text' in locals() else "", height=200)
+        st.text_area("Сырой ответ модели (не JSON):", response_text, height=200)
         return []
     except Exception as e:
         st.error(f"Ошибка распознавания: {str(e)}")
+        if 'response_text' in locals():
+            st.text_area("Сырой ответ модели:", response_text, height=200)
         return []
 
 # ------------------------------------------------------------
@@ -318,16 +363,19 @@ if uploaded_file is not None:
         if recognized_rooms and len(recognized_rooms) > 0:
             st.success(f"✅ Распознано {len(recognized_rooms)} помещений")
             df_recognized = pd.DataFrame(recognized_rooms)
-            st.dataframe(df_recognized, use_container_width=True)
+            # Показываем только основные колонки (все они есть после нормализации)
+            display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
+            existing_cols = [col for col in display_cols if col in df_recognized.columns]
+            st.dataframe(df_recognized[existing_cols], use_container_width=True)
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("📥 Применить распознанные данные", use_container_width=True, key="apply_recognized"):
+                if st.button("📥 Применить распознанные данные", key="apply_recognized", use_container_width=True):
                     st.session_state.rooms = recognized_rooms
                     st.session_state.manual_mode = False
                     st.rerun()
             with col2:
-                if st.button("✏️ Редактировать вручную", use_container_width=True, key="edit_recognized"):
+                if st.button("✏️ Редактировать вручную", key="edit_recognized", use_container_width=True):
                     st.session_state.manual_mode = True
                     st.rerun()
         else:
@@ -398,11 +446,23 @@ if st.session_state.manual_mode or not st.session_state.rooms:
                 st.success(f"✅ Добавлено: {room_name}")
                 st.rerun()
 
-# Отображение списка комнат
+# Отображение списка комнат (безопасное, с проверкой колонок)
 if st.session_state.rooms:
     df_rooms = pd.DataFrame(st.session_state.rooms)
-    display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
-    st.dataframe(df_rooms[display_cols], use_container_width=True, hide_index=True)
+    
+    # Убедимся, что все нужные колонки есть
+    required_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
+    for col in required_cols:
+        if col not in df_rooms.columns:
+            df_rooms[col] = None  # или 0 для числовых
+    
+    # Пересчитаем area, если длина и ширина есть
+    if "length" in df_rooms.columns and "width" in df_rooms.columns:
+        df_rooms["area"] = df_rooms["length"] * df_rooms["width"]
+    
+    # Отображаем только существующие колонки
+    existing_cols = [col for col in required_cols if col in df_rooms.columns]
+    st.dataframe(df_rooms[existing_cols], use_container_width=True, hide_index=True)
 
     col_clear, col_fill = st.columns(2)
     with col_clear:
@@ -896,3 +956,4 @@ SecurLLM V3 — полная версия с ML-распознаванием ч�
 - Все данные можно корректировать вручную.
 - Выберите сценарий: Справка, Смета, Рабочая документация, Заявка.
 """)
+
