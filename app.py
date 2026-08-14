@@ -8,7 +8,7 @@ import json
 import urllib3
 from datetime import datetime
 
-# Отключаем предупреждения о небезопасных SSL-запросах (для прототипа)
+# Отключаем предупреждения о SSL для прототипа
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ------------------------------------------------------------
@@ -101,7 +101,7 @@ except Exception:
     st.stop()
 
 # ------------------------------------------------------------
-# 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API (С ИСПРАВЛЕНИЕМ SSL)
+# 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API (с фиксом SSL и URL)
 # ------------------------------------------------------------
 def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, temperature=0.7):
     if not api_key:
@@ -123,7 +123,7 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
     except Exception as e:
         return f"Ошибка авторизации GigaChat: {str(e)}"
 
-    chat_url = "https://api.giga.chat/v1/chat/completions"
+    chat_url = "https://api.giga.chat/v1/chat/completions"  # новый URL
     chat_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -134,11 +134,13 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
         "messages": [
             {"role": "system", "content": """Ты — эксперт по системам физической безопасности и противопожарной защиты для объектов ПАО Сбербанк.
 Приоритетная нормативная база (от высшего к низшему):
-1. Сборник стандартов по комплексной безопасности № 4461 (ПАО Сбербанк) — главный документ.
-2. ФЗ-123, ФЗ-384, ФЗ-69.
-3. Р 102-2024 (Росгвардия), СП 484.1311500.2020 (с Изм.1), СП 3.13130.2026.
-4. ГОСТ Р 51558-2014, ГОСТ Р 51241-2008, ГОСТ 31565-2012, ГОСТ Р 70444-2022.
-5. ПУЭ, СП 76, СП 60, СП 134.
+1. Сборник стандартов по комплексной безопасности № 4461 (ПАО Сбербанк).
+2. ФЗ-123, ФЗ-384, ФЗ-69, ФЗ-152, ФЗ-187.
+3. Р 102-2024 (Росгвардия), СП 484.1311500.2020 (с Изм.1), СП 3.13130.2026, СП 76.
+4. ГОСТ Р 57580.1, 57580.2, 57580.4, Положения ЦБ РФ 851-П, 850-П, 382-П.
+5. ГОСТ Р 51558-2014, ГОСТ Р 51241-2008, ГОСТ 31565-2012, ГОСТ Р 70444-2022, ГОСТ 21.110, ГОСТ Р 21.1101.
+6. ПУЭ, СП 60, СП 134.
+7. Документация производителей (Болид, ТвинПро, ЦРТ, LTV).
 
 При генерации решений ссылайся на конкретные пункты документов.
 Отвечай строго по делу, используй профессиональную терминологию."""},
@@ -168,19 +170,9 @@ if "rooms" not in st.session_state:
     st.session_state.rooms = []
 if "calc_result" not in st.session_state:
     st.session_state.calc_result = None
-if "video_zones" not in st.session_state:
-    st.session_state.video_zones = []
-if "skud_zones" not in st.session_state:
-    st.session_state.skud_zones = []
-if "ohr_zones" not in st.session_state:
-    st.session_state.ohr_zones = []
-if "fire_zones" not in st.session_state:
-    st.session_state.fire_zones = []
-if "soue_zones" not in st.session_state:
-    st.session_state.soue_zones = []
 
 # ------------------------------------------------------------
-# 5. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ (расширенная)
+# 5. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ (расширенная, V3)
 # ------------------------------------------------------------
 st.subheader("📐 Экспликация помещений")
 
@@ -204,7 +196,7 @@ with st.expander("➕ Добавить помещение", expanded=False):
             fire_category = st.selectbox(
                 "Категория пожарной опасности",
                 ["А", "Б", "В", "Г", "Д"],
-                index=2  # В — наиболее частая для офисов
+                index=2
             )
             has_suspended = st.checkbox("Подвесной потолок")
             has_beams = st.checkbox("Балки > 400 мм")
@@ -232,7 +224,6 @@ with st.expander("➕ Добавить помещение", expanded=False):
             st.success(f"✅ Добавлено: {room_name}")
             st.rerun()
 
-# Отображение списка комнат
 if st.session_state.rooms:
     df_rooms = pd.DataFrame(st.session_state.rooms)
     display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy"]
@@ -264,265 +255,232 @@ else:
     st.info("Пока нет ни одного помещения. Добавьте комнаты для расчёта.")
 
 # ------------------------------------------------------------
-# 6. ВЫБОР ЗОН ДЛЯ СИСТЕМ
-# ------------------------------------------------------------
-st.subheader("🎯 Выбор зон для систем безопасности")
-
-# Видеонаблюдение
-with st.expander("📹 Видеонаблюдение", expanded=False):
-    video_opts = [
-        "Входная группа", "Кассовый узел (каждое место)", "Операционный зал",
-        "Хранилище", "Коридоры", "Кабинеты", "Периметр", "Банкоматы"
-    ]
-    selected_video = st.multiselect(
-        "Выберите зоны для видеонаблюдения",
-        video_opts,
-        default=st.session_state.video_zones
-    )
-    st.session_state.video_zones = selected_video
-
-# СКУД
-with st.expander("🚪 СКУД", expanded=False):
-    skud_opts = [
-        "Главный вход", "Внутренние двери", "Кассовый узел/хранилище",
-        "Серверная", "Кабинеты руководства"
-    ]
-    selected_skud = st.multiselect(
-        "Выберите зоны для СКУД",
-        skud_opts,
-        default=st.session_state.skud_zones
-    )
-    st.session_state.skud_zones = selected_skud
-    ident_type = st.radio("Тип идентификации", ["Карта", "Карта+PIN", "Карта+биометрия"], index=0)
-    two_factor = st.checkbox("Двухфакторная для критических зон", value=True)
-
-# Охранная сигнализация
-with st.expander("🔔 Охранная сигнализация", expanded=False):
-    ohr_opts = [
-        "Периметр (двери/окна)", "Объём (движение)", "Предметный (сейфы)",
-        "Усиленная охрана кассы/хранилища"
-    ]
-    selected_ohr = st.multiselect(
-        "Выберите зоны для охранной сигнализации",
-        ohr_opts,
-        default=st.session_state.ohr_zones
-    )
-    st.session_state.ohr_zones = selected_ohr
-
-# Пожарная сигнализация
-with st.expander("🔥 Пожарная сигнализация", expanded=False):
-    fire_opts = [
-        "Дымовые извещатели", "Тепловые извещатели", "Комбинированные извещатели"
-    ]
-    selected_fire = st.multiselect(
-        "Типы извещателей",
-        fire_opts,
-        default=st.session_state.fire_zones
-    )
-    st.session_state.fire_zones = selected_fire
-    vent_dist = st.number_input("Расстояние до вентиляции (м)", min_value=0.5, value=1.0, step=0.1)
-
-# СОУЭ
-with st.expander("📢 СОУЭ", expanded=False):
-    soue_opts = ["Звуковое оповещение", "Речевое оповещение"]
-    selected_soue = st.multiselect(
-        "Тип оповещения",
-        soue_opts,
-        default=st.session_state.soue_zones
-    )
-    st.session_state.soue_zones = selected_soue
-    light_exit = st.checkbox("Световые оповещатели «Выход»", value=True)
-
-# ------------------------------------------------------------
-# 7. ВЫБОР СЦЕНАРИЯ (кнопки)
+# 6. ВЫБОР СЦЕНАРИЯ (4 кнопки, как в V2)
 # ------------------------------------------------------------
 st.markdown("---")
 st.subheader("📄 Выберите сценарий генерации")
 
-col_tz, col_smeta, col_rd, col_zayavka = st.columns(4)
-with col_tz:
-    btn_tz = st.button("📋 ТЗ", use_container_width=True)
-with col_smeta:
-    btn_smeta = st.button("💰 Смета", use_container_width=True)
-with col_rd:
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    btn_info = st.button("📋 Справка", use_container_width=True)
+with col2:
+    btn_estimate = st.button("💰 Смета", use_container_width=True)
+with col3:
     btn_rd = st.button("📐 Рабочая документация", use_container_width=True)
-with col_zayavka:
-    btn_zayavka = st.button("📨 Заявка", use_container_width=True)
+with col4:
+    btn_application = st.button("📨 Заявка", use_container_width=True)
 
 # ------------------------------------------------------------
-# 8. ФУНКЦИИ РАСЧЁТА (обновлённые)
+# 7. ЛОГИКА ОПРЕДЕЛЕНИЯ СИСТЕМ (V2, автоматически)
 # ------------------------------------------------------------
-def calc_video(room, video_zones):
-    equip = {}
-    area = room["area"]
+def get_systems_for_room(room):
+    purpose = room.get("purpose", "").lower()
+    is_critical = room.get("is_critical", False)
+    has_valuables = room.get("has_valuables", False)
+    has_windows = room.get("windows", 0) > 0
+    has_doors = room.get("doors", 0) > 0
+    occupancy = room.get("occupancy", 0)
     
-    if "Входная группа" in video_zones:
-        equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-        if room["windows"] > 0:
-            equip["Уличная LTV-3RN6481-R"] = equip.get("Уличная LTV-3RN6481-R", 0) + 1
-    if "Кассовый узел (каждое место)" in video_zones:
-        equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-    if "Операционный зал" in video_zones:
-        cnt = max(1, math.ceil(area / 20))
-        equip["Купол LTV-3CNB40-F28"] = equip.get("Купол LTV-3CNB40-F28", 0) + cnt
-    if "Хранилище" in video_zones:
-        equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-    if "Коридоры" in video_zones:
-        equip["Купол LTV-3CNB40-F28"] = equip.get("Купол LTV-3CNB40-F28", 0) + 1
-    if "Кабинеты" in video_zones:
-        equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-    if "Периметр" in video_zones:
-        equip["Уличная LTV-3RN6481-R"] = equip.get("Уличная LTV-3RN6481-R", 0) + 1
-    if "Банкоматы" in video_zones:
-        equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-    return {k: v for k, v in equip.items() if v > 0}
+    systems = {
+        "video": False,
+        "skud": False,
+        "security": False,
+        "fire": False,
+        "soue": False
+    }
+    
+    # --- Определяем по назначению ---
+    if "касс" in purpose or "касса" in purpose:
+        systems["video"] = True
+        systems["skud"] = True
+        systems["security"] = True
+        systems["fire"] = True
+        systems["soue"] = True
+    elif "сервер" in purpose or "цод" in purpose:
+        systems["video"] = True
+        systems["skud"] = True
+        systems["security"] = True
+        systems["fire"] = True
+        systems["soue"] = True
+    elif "операцион" in purpose or "зал" in purpose:
+        systems["video"] = True
+        systems["fire"] = True
+        systems["soue"] = True
+    elif "кабинет" in purpose or "офис" in purpose:
+        systems["video"] = True
+        systems["fire"] = True
+        systems["soue"] = True
+        if is_critical:
+            systems["skud"] = True
+            systems["security"] = True
+    elif "хранилищ" in purpose or "архив" in purpose:
+        systems["video"] = True
+        systems["skud"] = True
+        systems["security"] = True
+        systems["fire"] = True
+        systems["soue"] = True
+    elif "коридор" in purpose or "холл" in purpose:
+        systems["video"] = True
+        systems["fire"] = True
+        if occupancy > 10:
+            systems["soue"] = True
+    elif "сервер" in purpose:
+        systems["video"] = True
+        systems["skud"] = True
+        systems["security"] = True
+        systems["fire"] = True
+        systems["soue"] = True
+    else:  # общий случай — офисное помещение
+        systems["video"] = True
+        systems["fire"] = True
+        systems["soue"] = True if occupancy > 5 else False
+    
+    # --- Корректировки по дополнительным признакам ---
+    if has_valuables and not systems["security"]:
+        systems["security"] = True
+        systems["skud"] = True
+    if is_critical and not systems["skud"]:
+        systems["skud"] = True
+        systems["security"] = True
+    
+    return systems
 
-def calc_skud(room, skud_zones, ident_type, two_factor):
+# ------------------------------------------------------------
+# 8. ФУНКЦИИ РАСЧЁТА ОБОРУДОВАНИЯ
+# ------------------------------------------------------------
+def calc_video(room):
     equip = {}
-    doors = room["doors"]
-    is_critical = room["is_critical"]
-    
-    if "Главный вход" in skud_zones:
-        equip["Считыватель ER 1402"] = equip.get("Считыватель ER 1402", 0) + 1
-        equip["Контроллер NG-1000"] = equip.get("Контроллер NG-1000", 0) + 1
-    if "Внутренние двери" in skud_zones:
-        equip["Считыватель Esmart Reader"] = equip.get("Считыватель Esmart Reader", 0) + doors
-        equip["Контроллер MB-NET II"] = equip.get("Контроллер MB-NET II", 0) + doors
-    if "Кассовый узел/хранилище" in skud_zones:
-        equip["Считыватель ER 1402"] = equip.get("Считыватель ER 1402", 0) + 1
-        equip["Контроллер NG-1000"] = equip.get("Контроллер NG-1000", 0) + 1
-        if two_factor or is_critical:
-            equip["Считыватель биометрический FS6/FS8"] = equip.get("Считыватель биометрический FS6/FS8", 0) + 1
-    if "Серверная" in skud_zones or (is_critical and "Серверная" not in skud_zones):
-        if "Серверная" in skud_zones:
-            equip["Считыватель ER 1402"] = equip.get("Считыватель ER 1402", 0) + 1
-            equip["Контроллер NG-1000"] = equip.get("Контроллер NG-1000", 0) + 1
-            if two_factor:
-                equip["Считыватель биометрический FS6/FS8"] = equip.get("Считыватель биометрический FS6/FS8", 0) + 1
-    if "Кабинеты руководства" in skud_zones:
-        equip["Считыватель Esmart Reader"] = equip.get("Считыватель Esmart Reader", 0) + 1
-        equip["Контроллер MB-NET II"] = equip.get("Контроллер MB-NET II", 0) + 1
-    return {k: v for k, v in equip.items() if v > 0}
+    if room.get("has_valuables") or "касс" in room.get("purpose", "").lower():
+        equip["Купол LTV-3CND40-M2714"] = 1
+    if room.get("windows", 0) > 0:
+        equip["Уличная LTV-3RN6481-R"] = room.get("windows", 0)
+    if "операцион" in room.get("purpose", "").lower():
+        cnt = max(1, math.ceil(room["area"] / 20))
+        equip["Купол LTV-3CNB40-F28"] = cnt
+    if "коридор" in room.get("purpose", "").lower():
+        equip["Купол LTV-3CNB40-F28"] = 1
+    return equip
 
-def calc_ohr(room, ohr_zones):
+def calc_skud(room):
     equip = {}
-    area = room["area"]
-    doors = room["doors"]
-    windows = room["windows"]
-    has_valuables = room["has_valuables"]
-    
-    if "Периметр (двери/окна)" in ohr_zones:
-        cnt = doors + windows
-        equip["Извещатель «Стекло-3»"] = equip.get("Извещатель «Стекло-3»", 0) + max(cnt, 1)
-    if "Объём (движение)" in ohr_zones:
+    doors = room.get("doors", 0)
+    if room.get("is_critical") or "сервер" in room.get("purpose", "").lower():
+        equip["Считыватель биометрический FS6/FS8"] = 1
+        equip["Считыватель ER 1402"] = 1
+        equip["Контроллер NG-1000"] = 1
+    elif "касс" in room.get("purpose", "").lower() or room.get("has_valuables"):
+        equip["Считыватель ER 1402"] = 1
+        equip["Контроллер NG-1000"] = 1
+        equip["Считыватель биометрический FS6/FS8"] = 1
+    elif doors > 0:
+        equip["Считыватель Esmart Reader"] = doors
+        equip["Контроллер MB-NET II"] = doors
+    return equip
+
+def calc_security(room):
+    equip = {}
+    doors = room.get("doors", 0)
+    windows = room.get("windows", 0)
+    area = room.get("area", 0)
+    if doors + windows > 0:
+        equip["Извещатель «Стекло-3»"] = doors + windows
+    if area > 0:
         cnt = max(1, math.ceil(area / 30))
-        equip["Извещатель «Фотон-9»"] = equip.get("Извещатель «Фотон-9»", 0) + cnt
-    if "Предметный (сейфы)" in ohr_zones:
-        equip["Извещатель С2000-СМК"] = equip.get("Извещатель С2000-СМК", 0) + 1
-    if "Усиленная охрана кассы/хранилища" in ohr_zones or has_valuables:
+        equip["Извещатель «Фотон-9»"] = cnt
+    if room.get("has_valuables") or "касс" in room.get("purpose", "").lower():
+        equip["Извещатель С2000-СМК"] = 1
+        # Усиленная охрана
         equip["Извещатель «Фотон-9»"] = equip.get("Извещатель «Фотон-9»", 0) + 2
         equip["Извещатель «Стекло-3»"] = equip.get("Извещатель «Стекло-3»", 0) + 2
-    return {k: v for k, v in equip.items() if v > 0}
+    return equip
 
-def calc_fire(room, fire_types, vent_dist):
+def calc_fire(room):
     equip = {}
-    area = room["area"]
-    height = room["height"]
-    has_suspended = room["has_suspended"]
-    has_beams = room["has_beams"]
-    
+    area = room.get("area", 0)
+    height = room.get("height", 3.0)
+    suspended = room.get("has_suspended", False)
+    beams = room.get("has_beams", False)
     coeff = 1.0
-    if has_suspended:
+    if suspended:
         coeff *= 1.2
-    if has_beams:
+    if beams:
         coeff *= 1.3
     if height > 4.0:
         coeff *= 1.1
-    
-    base_cnt = max(1, math.ceil(area / 20 * coeff))
-    
-    if "Дымовые извещатели" in fire_types:
-        equip["Дымовой ИП 212-141"] = equip.get("Дымовой ИП 212-141", 0) + base_cnt
-    if "Тепловые извещатели" in fire_types:
-        equip["Тепловой ИП 101-3А"] = equip.get("Тепловой ИП 101-3А", 0) + base_cnt
-    if "Комбинированные извещатели" in fire_types:
-        equip["Комбинированный ИП 212/101"] = equip.get("Комбинированный ИП 212/101", 0) + base_cnt
-    
-    equip["ППКУП «Сириус»"] = equip.get("ППКУП «Сириус»", 0) + 1
-    equip["С2000-КДЛ"] = equip.get("С2000-КДЛ", 0) + 1
-    
-    return {k: v for k, v in equip.items() if v > 0}
+    cnt = max(1, math.ceil(area / 20 * coeff))
+    equip["Дымовой ИП 212-141"] = cnt
+    equip["ППКУП «Сириус»"] = 1
+    equip["С2000-КДЛ"] = 1
+    return equip
 
-def calc_soue(room, soue_types, light_exit):
+def calc_soue(room):
     equip = {}
-    area = room["area"]
-    occupancy = room["occupancy"]
-    
-    cnt_area = max(1, math.ceil(area / 30))
-    
-    if "Звуковое оповещение" in soue_types:
-        equip["Оповещатель «Рупор»"] = equip.get("Оповещатель «Рупор»", 0) + cnt_area
-    if "Речевое оповещение" in soue_types:
-        equip["Оповещатель речевой «Рупор-Р»"] = equip.get("Оповещатель речевой «Рупор-Р»", 0) + cnt_area
-    if light_exit:
-        equip["Световой оповещатель «Выход»"] = equip.get("Световой оповещатель «Выход»", 0) + max(1, room["floor"])
-    return {k: v for k, v in equip.items() if v > 0}
+    area = room.get("area", 0)
+    occupancy = room.get("occupancy", 0)
+    floor = room.get("floor", 1)
+    cnt = max(1, math.ceil(area / 30))
+    if occupancy > 10:
+        equip["Оповещатель речевой «Рупор-Р»"] = cnt
+    else:
+        equip["Оповещатель «Рупор»"] = cnt
+    equip["Световой оповещатель «Выход»"] = max(1, floor)
+    return equip
 
 # ------------------------------------------------------------
-# 9. АГРЕГАЦИЯ И ГЕНЕРАЦИЯ SVG (улучшенная)
+# 9. АГРЕГАЦИЯ И SVG
 # ------------------------------------------------------------
-def aggregate_equipment(rooms, zones):
-    total_equip = {"video": {}, "skud": {}, "ohr": {}, "fire": {}, "soue": {}}
+def aggregate_equipment(rooms):
+    total_equip = {"video": {}, "skud": {}, "security": {}, "fire": {}, "soue": {}}
     room_details = []
-    
     for room in rooms:
-        v = calc_video(room, zones["video"])
-        for k, cnt in v.items():
-            total_equip["video"][k] = total_equip["video"].get(k, 0) + cnt
-        s = calc_skud(room, zones["skud"], zones["skud_ident"], zones["skud_2fa"])
-        for k, cnt in s.items():
-            total_equip["skud"][k] = total_equip["skud"].get(k, 0) + cnt
-        o = calc_ohr(room, zones["ohr"])
-        for k, cnt in o.items():
-            total_equip["ohr"][k] = total_equip["ohr"].get(k, 0) + cnt
-        f = calc_fire(room, zones["fire"], zones["fire_vent_dist"])
-        for k, cnt in f.items():
-            total_equip["fire"][k] = total_equip["fire"].get(k, 0) + cnt
-        se = calc_soue(room, zones["soue"], zones["soue_light"])
-        for k, cnt in se.items():
-            total_equip["soue"][k] = total_equip["soue"].get(k, 0) + cnt
+        sys = get_systems_for_room(room)
+        video = calc_video(room) if sys["video"] else {}
+        skud = calc_skud(room) if sys["skud"] else {}
+        security = calc_security(room) if sys["security"] else {}
+        fire = calc_fire(room) if sys["fire"] else {}
+        soue = calc_soue(room) if sys["soue"] else {}
+        
+        for k, v in video.items():
+            total_equip["video"][k] = total_equip["video"].get(k, 0) + v
+        for k, v in skud.items():
+            total_equip["skud"][k] = total_equip["skud"].get(k, 0) + v
+        for k, v in security.items():
+            total_equip["security"][k] = total_equip["security"].get(k, 0) + v
+        for k, v in fire.items():
+            total_equip["fire"][k] = total_equip["fire"].get(k, 0) + v
+        for k, v in soue.items():
+            total_equip["soue"][k] = total_equip["soue"].get(k, 0) + v
+        
         room_details.append({
             "name": room["name"],
-            "video": v,
-            "skud": s,
-            "ohr": o,
-            "fire": f,
-            "soue": se
+            "systems": sys,
+            "video": video,
+            "skud": skud,
+            "security": security,
+            "fire": fire,
+            "soue": soue,
+            "room": room
         })
     return total_equip, room_details
 
 def generate_svg(rooms, details):
-    """Улучшенная SVG-генерация с условными обозначениями"""
     if not rooms:
-        return "<svg><text>Нет помещений для отображения</text></svg>"
-    
+        return "<svg><text>Нет помещений</text></svg>"
     scale = 20
     margin = 30
     x_offset = margin
     y_offset = margin
-    
     colors = {
         "video": "#3498db",
         "skud": "#2ecc71",
-        "ohr": "#e67e22",
+        "security": "#e67e22",
         "fire": "#e74c3c",
         "soue": "#9b59b6"
     }
-    
     symbols = {
         "video": '<circle cx="0" cy="0" r="6" fill="{color}"/><circle cx="0" cy="0" r="8" fill="none" stroke="{color}" stroke-width="1"/>',
         "skud": '<rect x="-6" y="-6" width="12" height="12" fill="{color}" rx="2"/>',
-        "ohr": '<polygon points="0,-8 7,6 -7,6" fill="{color}"/>',
+        "security": '<polygon points="0,-8 7,6 -7,6" fill="{color}"/>',
         "fire": '<circle cx="0" cy="0" r="7" fill="{color}"/><line x1="-5" y1="0" x2="5" y2="0" stroke="white" stroke-width="2"/>',
         "soue": '<rect x="-6" y="-4" width="12" height="8" fill="{color}" rx="2"/><rect x="-3" y="-8" width="6" height="4" fill="{color}" rx="1"/>'
     }
@@ -550,31 +508,29 @@ def generate_svg(rooms, details):
         svg_parts.append(f'<text x="{x+8}" y="{y+50}">эт.{room["floor"]}</text>')
         
         # Двери
-        if room["doors"] > 0:
-            for d in range(min(room["doors"], 3)):
-                dx = x + 10 + d * 20
-                dy = y + h - 12
-                svg_parts.append(f'<line x1="{dx}" y1="{dy}" x2="{dx+15}" y2="{dy}" stroke="#f39c12" stroke-width="3"/>')
-                svg_parts.append(f'<path d="M{dx+15},{dy} A12,12 0 0,0 {dx+3},{dy-10}" fill="none" stroke="#f39c12" stroke-width="1.5"/>')
+        for d in range(min(room.get("doors", 0), 3)):
+            dx = x + 10 + d * 20
+            dy = y + h - 12
+            svg_parts.append(f'<line x1="{dx}" y1="{dy}" x2="{dx+15}" y2="{dy}" stroke="#f39c12" stroke-width="3"/>')
+            svg_parts.append(f'<path d="M{dx+15},{dy} A12,12 0 0,0 {dx+3},{dy-10}" fill="none" stroke="#f39c12" stroke-width="1.5"/>')
         
         # Окна
-        if room["windows"] > 0:
-            for wnd in range(min(room["windows"], 3)):
-                wx = x + w - 30 - wnd * 25
-                wy = y + 12
-                svg_parts.append(f'<rect x="{wx}" y="{wy}" width="20" height="10" fill="#a8d8ea" stroke="#2c3e50" stroke-width="1.5" rx="1"/>')
-                svg_parts.append(f'<line x1="{wx+10}" y1="{wy}" x2="{wx+10}" y2="{wy+10}" stroke="#2c3e50" stroke-width="1"/>')
+        for wnd in range(min(room.get("windows", 0), 3)):
+            wx = x + w - 30 - wnd * 25
+            wy = y + 12
+            svg_parts.append(f'<rect x="{wx}" y="{wy}" width="20" height="10" fill="#a8d8ea" stroke="#2c3e50" stroke-width="1.5" rx="1"/>')
+            svg_parts.append(f'<line x1="{wx+10}" y1="{wy}" x2="{wx+10}" y2="{wy+10}" stroke="#2c3e50" stroke-width="1"/>')
         
         # Оборудование
         icon_x = x + 8
         icon_y = y + 65
-        for sys, equip_list in det.items():
-            if equip_list:
+        for sys in ["video", "skud", "security", "fire", "soue"]:
+            equip_list = det.get(sys, {})
+            if equip_list and det["systems"].get(sys, False):
                 color = colors.get(sys, "#95a5a6")
                 for eq_name, cnt in equip_list.items():
                     symbol = symbols.get(sys, '<circle cx="0" cy="0" r="5" fill="{color}"/>')
-                    symbol_rendered = symbol.format(color=color)
-                    svg_parts.append(f'<g transform="translate({icon_x},{icon_y})">{symbol_rendered}</g>')
+                    svg_parts.append(f'<g transform="translate({icon_x},{icon_y})">{symbol.format(color=color)}</g>')
                     short_name = eq_name[:12] + ("..." if len(eq_name) > 12 else "")
                     svg_parts.append(f'<text x="{icon_x+12}" y="{icon_y+3}" font-size="9">{short_name} ({cnt})</text>')
                     icon_y += 16
@@ -590,7 +546,7 @@ def generate_svg(rooms, details):
     legend_items = [
         ("video", "Видео"),
         ("skud", "СКУД"),
-        ("ohr", "Охрана"),
+        ("security", "Охрана"),
         ("fire", "Пожар"),
         ("soue", "СОУЭ")
     ]
@@ -598,73 +554,73 @@ def generate_svg(rooms, details):
         lx = legend_x + 10 + i * 70
         ly = legend_y + 32
         color = colors.get(sys, "#95a5a6")
-        symbol = symbols.get(sys, '<circle cx="0" cy="0" r="5" fill="{color}"/>')
-        symbol_rendered = symbol.format(color=color)
-        svg_parts.append(f'<g transform="translate({lx},{ly})">{symbol_rendered}</g>')
+        svg_parts.append(f'<g transform="translate({lx},{ly})">{symbols.get(sys, "").format(color=color)}</g>')
         svg_parts.append(f'<text x="{lx+14}" y="{ly+3}" font-size="9">{name}</text>')
     
     svg_parts.append('</svg>')
     return "\n".join(svg_parts)
 
 # ------------------------------------------------------------
-# 10. ГЕНЕРАЦИЯ ДОКУМЕНТОВ (запуск по кнопкам)
+# 10. ГЕНЕРАЦИЯ ДОКУМЕНТОВ
 # ------------------------------------------------------------
-def generate_document(scenario, rooms, zones, total_equip, room_details, svg_code):
+def generate_document(scenario, rooms, total_equip, room_details, svg_code):
     rooms_desc = ", ".join([f"{r['name']} ({r['length']}×{r['width']} м, эт.{r['floor']})" for r in rooms])
     total_area = sum(r["area"] for r in rooms)
     
-    if scenario == "tz":
+    if scenario == "info":
         prompt = f"""
-Составь детальное техническое задание (ТЗ) на проектирование системы безопасности для ВСП банка.
-В ТЗ включи:
-1. Общие положения (объект, нормативная база с приоритетами).
-2. Требования к интеграции со смежными системами (СКС, вентиляция, кондиционирование).
-3. Требования по каждой системе: САПС, СОУЭ, СКУД, СОТС, СОТ.
-   - Для каждой системы укажи: общие положения, оборудование (целевой перечень), защиту помещений, управление и интеграцию, электропитание, кабельные линии.
-4. Состав рабочей документации (по ГОСТ Р 21.1101-2013).
-5. Общие требования к монтажу и пусконаладке.
+Ты эксперт по системам безопасности для объектов банка.
+На основе характеристик помещений и нормативной базы сформируй детальную справку.
 
 Помещения: {rooms_desc}
 Общая площадь: {total_area} м²
-Оборудование (агрегированное по системам): {json.dumps(total_equip, ensure_ascii=False, indent=2)}
-Зоны: {zones}
 
-Используй ссылки на конкретные пункты нормативных документов.
-Приоритет: Сборник № 4461 → ФЗ-123 → Р 102-2024 → СП 484 → ГОСТ.
+Для каждого помещения определи:
+- Категорию помещения (зона 0,1,2,3A,3B,3C,3D)
+- Рекомендуемый состав оборудования (системы и конкретные устройства)
+- Обоснование со ссылками на нормативные документы.
+
+Формат ответа:
+**Помещение: [название]**
+- Зона: ...
+- Состав систем: ...
+- Оборудование: ...
+- Обоснование: ссылки на конкретные пункты.
+
+Используй приоритетную нормативную базу: Сборник № 4461, ФЗ-123, Р 102-2024, СП 484 (Изм.1), СП 3.13130.2026, и другие согласно иерархии.
 """
         return call_gigachat(prompt, GIGACHAT_KEY)
     
-    elif scenario == "smeta":
+    elif scenario == "estimate":
         prompt = f"""
-Составь смету на оборудование для объекта (ВСП банка) на основе спецификации.
-Смета должна содержать таблицу с колонками: № п/п, Наименование, Тип, Кол-во, Цена за ед. (руб.), Сумма (руб.), Примечание.
-Итого по разделам и общая сумма.
-Цены — примерные, справочные.
+Составь смету на оборудование для ВСП банка.
+Оборудование (агрегированное):
+{json.dumps(total_equip, ensure_ascii=False, indent=2)}
 
-Помещения: {rooms_desc}
-Общая площадь: {total_area} м²
-Оборудование: {json.dumps(total_equip, ensure_ascii=False, indent=2)}
+Формат: таблица с колонками:
+№ п/п, Наименование, Тип, Кол-во, Цена за ед. (руб.), Сумма (руб.), Примечание.
+Цены — примерные, справочные.
+Итого по разделам и общая сумма.
 """
         return call_gigachat(prompt, GIGACHAT_KEY)
     
     elif scenario == "rd":
         prompt = f"""
-Сформируй рабочую документацию (РД) на систему безопасности для ВСП банка.
-Включи следующие разделы:
-1. Пояснительная записка (описание решений, обоснование со ссылками на нормативы).
-2. Структурная схема (описание взаимосвязи оборудования).
-3. Спецификация оборудования (по ГОСТ 21.110-2013) — таблица с позициями, названием, типом, кол-вом.
-4. Кабельный журнал (упрощённый) — таблица: откуда, куда, марка кабеля, длина.
-5. Задания на смежные системы (СКС, электроснабжение, вентиляция).
+Сформируй рабочую документацию (РД) на системы безопасности для ВСП банка.
 
 Помещения: {rooms_desc}
 Общая площадь: {total_area} м²
 Оборудование: {json.dumps(total_equip, ensure_ascii=False, indent=2)}
-Зоны: {zones}
+
+Включи разделы:
+1. Пояснительная записка: описание решений, обоснование со ссылками на нормативы.
+2. Спецификация оборудования по ГОСТ 21.110-2013 (таблица).
+3. Кабельный журнал (упрощённый): откуда, куда, марка, длина.
+4. Задания на смежные системы (СКС, электроснабжение, вентиляция).
 """
         return call_gigachat(prompt, GIGACHAT_KEY)
     
-    elif scenario == "zayavka":
+    elif scenario == "application":
         prompt = f"""
 Сформируй заявку на выполнение работ по установке системы безопасности.
 Включи всё, что в РД, и добавь:
@@ -673,7 +629,6 @@ def generate_document(scenario, rooms, zones, total_equip, room_details, svg_cod
 - Статус выполнения: принята в работу.
 
 Помещения: {rooms_desc}
-Общая площадь: {total_area} м²
 Оборудование: {json.dumps(total_equip, ensure_ascii=False, indent=2)}
 """
         return call_gigachat(prompt, GIGACHAT_KEY)
@@ -686,64 +641,29 @@ def generate_document(scenario, rooms, zones, total_equip, room_details, svg_cod
 if not st.session_state.rooms:
     st.warning("⚠️ Добавьте хотя бы одно помещение для расчёта.")
 else:
-    zones_defined = (
-        st.session_state.video_zones or
-        st.session_state.skud_zones or
-        st.session_state.ohr_zones or
-        st.session_state.fire_zones or
-        st.session_state.soue_zones
-    )
-    if not zones_defined:
-        st.info("ℹ️ Выберите зоны для систем безопасности в разделах выше.")
-    
     scenario = None
-    if btn_tz:
-        scenario = "tz"
-    elif btn_smeta:
-        scenario = "smeta"
+    if btn_info:
+        scenario = "info"
+    elif btn_estimate:
+        scenario = "estimate"
     elif btn_rd:
         scenario = "rd"
-    elif btn_zayavka:
-        scenario = "zayavka"
+    elif btn_application:
+        scenario = "application"
     
-    if scenario and zones_defined:
-        with st.spinner(f"🔄 Генерация {scenario.upper()}..."):
-            zones = {
-                "video": st.session_state.video_zones,
-                "skud": st.session_state.skud_zones,
-                "ohr": st.session_state.ohr_zones,
-                "fire": st.session_state.fire_zones,
-                "soue": st.session_state.soue_zones,
-                "skud_ident": ident_type if 'ident_type' in locals() else "Карта",
-                "skud_2fa": two_factor if 'two_factor' in locals() else True,
-                "fire_vent_dist": vent_dist if 'vent_dist' in locals() else 1.0,
-                "soue_light": light_exit if 'light_exit' in locals() else True
-            }
-            
-            total_equip, room_details = aggregate_equipment(st.session_state.rooms, zones)
-            
-            svg_code = None
-            if scenario in ["rd", "zayavka"]:
-                svg_code = generate_svg(st.session_state.rooms, room_details)
-            
-            document_text = generate_document(
-                scenario,
-                st.session_state.rooms,
-                zones,
-                total_equip,
-                room_details,
-                svg_code
-            )
+    if scenario:
+        with st.spinner(f"🔄 Генерация {scenario}..."):
+            total_equip, room_details = aggregate_equipment(st.session_state.rooms)
+            svg_code = generate_svg(st.session_state.rooms, room_details) if scenario in ["rd", "application"] else None
+            document_text = generate_document(scenario, st.session_state.rooms, total_equip, room_details, svg_code)
             
             st.session_state.calc_result = {
                 "scenario": scenario,
                 "document": document_text,
                 "svg": svg_code,
-                "rooms": st.session_state.rooms,
-                "total_equip": total_equip,
-                "room_details": room_details
+                "total_equip": total_equip
             }
-            st.success(f"✅ {scenario.upper()} сгенерирован!")
+            st.success(f"✅ Документ сгенерирован!")
             st.rerun()
 
 # ------------------------------------------------------------
@@ -752,31 +672,19 @@ else:
 if st.session_state.calc_result:
     res = st.session_state.calc_result
     st.markdown("---")
-    st.subheader(f"📄 Результат: {res['scenario'].upper()}")
+    st.subheader(f"📄 Результат: {res['scenario']}")
     
-    st.text_area("Документ", res["document"], height=400)
+    st.text_area("Содержание", res["document"], height=400)
     
     if res.get("svg"):
         st.subheader("🖼️ Схема расстановки оборудования")
         st.components.v1.html(res["svg"], height=600)
         b64 = base64.b64encode(res["svg"].encode()).decode()
-        href = f'<a href="data:image/svg+xml;base64,{b64}" download="scheme.svg">📥 Скачать SVG</a>'
-        st.markdown(href, unsafe_allow_html=True)
-    
-    st.subheader("📊 Сводка по оборудованию")
-    for sys, equip in res["total_equip"].items():
-        if equip:
-            st.write(f"**{sys.upper()}:**")
-            df = pd.DataFrame(list(equip.items()), columns=["Наименование", "Кол-во"])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.markdown(f'<a href="data:image/svg+xml;base64,{b64}" download="scheme.svg">📥 Скачать SVG</a>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 13. ПРИМЕЧАНИЕ ДЛЯ ML-ИНТЕГРАЦИИ
+# 13. ПРИМЕЧАНИЕ
 # ------------------------------------------------------------
-st.markdown("---")
 st.caption("""
-**Примечание:** Прототип V3 с расширенной экспликацией и улучшенной SVG-генерацией.
-- Данные вводятся вручную или могут быть заполнены автоматически после интеграции ML-распознавания чертежей.
-- Экспорт в DOCX/PDF — в следующих версиях.
-- Цены в смете — справочные.
+Прототип V3 — объединяет лучшие черты V2 (интерфейс, логика) и V3 (экспликация, нормативы, SVG).
 """)
