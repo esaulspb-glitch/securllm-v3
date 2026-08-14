@@ -123,7 +123,7 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
     except Exception as e:
         return f"Ошибка авторизации GigaChat: {str(e)}"
 
-    chat_url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    chat_url = "https://api.giga.chat/v1/chat/completions"
     chat_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
