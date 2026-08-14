@@ -5,7 +5,11 @@ import base64
 import uuid
 import math
 import json
+import urllib3
 from datetime import datetime
+
+# Отключаем предупреждения о небезопасных SSL-запросах (для прототипа)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ------------------------------------------------------------
 # 1. НАСТРОЙКА СТРАНИЦЫ
@@ -97,7 +101,7 @@ except Exception:
     st.stop()
 
 # ------------------------------------------------------------
-# 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API
+# 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API (С ИСПРАВЛЕНИЕМ SSL)
 # ------------------------------------------------------------
 def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, temperature=0.7):
     if not api_key:
@@ -111,7 +115,7 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
     }
     auth_data = {"scope": "GIGACHAT_API_PERS"}
     try:
-        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10)
+        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
         auth_response.raise_for_status()
         access_token = auth_response.json().get("access_token")
         if not access_token:
@@ -145,7 +149,7 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
         "stream": False
     }
     try:
-        response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=90)
+        response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=90, verify=False)
         response.raise_for_status()
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
@@ -231,7 +235,6 @@ with st.expander("➕ Добавить помещение", expanded=False):
 # Отображение списка комнат
 if st.session_state.rooms:
     df_rooms = pd.DataFrame(st.session_state.rooms)
-    # Выбираем основные колонки для отображения
     display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy"]
     st.dataframe(df_rooms[display_cols], use_container_width=True, hide_index=True)
 
@@ -391,7 +394,6 @@ def calc_skud(room, skud_zones, ident_type, two_factor):
         if two_factor or is_critical:
             equip["Считыватель биометрический FS6/FS8"] = equip.get("Считыватель биометрический FS6/FS8", 0) + 1
     if "Серверная" in skud_zones or (is_critical and "Серверная" not in skud_zones):
-        # Если серверная есть в списке или помещение критичное
         if "Серверная" in skud_zones:
             equip["Считыватель ER 1402"] = equip.get("Считыватель ER 1402", 0) + 1
             equip["Контроллер NG-1000"] = equip.get("Контроллер NG-1000", 0) + 1
@@ -429,7 +431,6 @@ def calc_fire(room, fire_types, vent_dist):
     has_suspended = room["has_suspended"]
     has_beams = room["has_beams"]
     
-    # Коэффициенты по СП 484.1311500.2020 (с Изм.1)
     coeff = 1.0
     if has_suspended:
         coeff *= 1.2
@@ -438,8 +439,6 @@ def calc_fire(room, fire_types, vent_dist):
     if height > 4.0:
         coeff *= 1.1
     
-    # Радиус зоны контроля по СП 484 (Изм.1): дымовые 6.4 м, тепловые 3.5 м
-    # Ориентировочно: 1 извещатель на 20 кв.м с коэффициентами
     base_cnt = max(1, math.ceil(area / 20 * coeff))
     
     if "Дымовые извещатели" in fire_types:
@@ -449,7 +448,6 @@ def calc_fire(room, fire_types, vent_dist):
     if "Комбинированные извещатели" in fire_types:
         equip["Комбинированный ИП 212/101"] = equip.get("Комбинированный ИП 212/101", 0) + base_cnt
     
-    # Приборы управления (на помещение или на группу — упрощённо)
     equip["ППКУП «Сириус»"] = equip.get("ППКУП «Сириус»", 0) + 1
     equip["С2000-КДЛ"] = equip.get("С2000-КДЛ", 0) + 1
     
@@ -460,9 +458,7 @@ def calc_soue(room, soue_types, light_exit):
     area = room["area"]
     occupancy = room["occupancy"]
     
-    # По СП 3.13130.2026: количество оповещателей по площади
     cnt_area = max(1, math.ceil(area / 30))
-    # По количеству людей: если > 50, то речевое (но это в промпте GigaChat)
     
     if "Звуковое оповещение" in soue_types:
         equip["Оповещатель «Рупор»"] = equip.get("Оповещатель «Рупор»", 0) + cnt_area
@@ -515,7 +511,6 @@ def generate_svg(rooms, details):
     x_offset = margin
     y_offset = margin
     
-    # Цвета систем
     colors = {
         "video": "#3498db",
         "skud": "#2ecc71",
@@ -524,7 +519,6 @@ def generate_svg(rooms, details):
         "soue": "#9b59b6"
     }
     
-    # Символы для оборудования (стандартизированные)
     symbols = {
         "video": '<circle cx="0" cy="0" r="6" fill="{color}"/><circle cx="0" cy="0" r="8" fill="none" stroke="{color}" stroke-width="1"/>',
         "skud": '<rect x="-6" y="-6" width="12" height="12" fill="{color}" rx="2"/>',
@@ -550,13 +544,12 @@ def generate_svg(rooms, details):
         else:
             x_offset = margin
         
-        # Комната
         svg_parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="#ffffff" stroke="#2c3e50" stroke-width="2" rx="2"/>')
         svg_parts.append(f'<text x="{x+8}" y="{y+18}" font-weight="bold">{room["name"]}</text>')
         svg_parts.append(f'<text x="{x+8}" y="{y+34}">{room["length"]:.1f}×{room["width"]:.1f} м</text>')
         svg_parts.append(f'<text x="{x+8}" y="{y+50}">эт.{room["floor"]}</text>')
         
-        # Двери (по ГОСТ 21.501-93)
+        # Двери
         if room["doors"] > 0:
             for d in range(min(room["doors"], 3)):
                 dx = x + 10 + d * 20
@@ -579,11 +572,9 @@ def generate_svg(rooms, details):
             if equip_list:
                 color = colors.get(sys, "#95a5a6")
                 for eq_name, cnt in equip_list.items():
-                    # Символ
                     symbol = symbols.get(sys, '<circle cx="0" cy="0" r="5" fill="{color}"/>')
                     symbol_rendered = symbol.format(color=color)
                     svg_parts.append(f'<g transform="translate({icon_x},{icon_y})">{symbol_rendered}</g>')
-                    # Подпись
                     short_name = eq_name[:12] + ("..." if len(eq_name) > 12 else "")
                     svg_parts.append(f'<text x="{icon_x+12}" y="{icon_y+3}" font-size="9">{short_name} ({cnt})</text>')
                     icon_y += 16
@@ -619,11 +610,8 @@ def generate_svg(rooms, details):
 # 10. ГЕНЕРАЦИЯ ДОКУМЕНТОВ (запуск по кнопкам)
 # ------------------------------------------------------------
 def generate_document(scenario, rooms, zones, total_equip, room_details, svg_code):
-    """Генерация документа через GigaChat по выбранному сценарию"""
     rooms_desc = ", ".join([f"{r['name']} ({r['length']}×{r['width']} м, эт.{r['floor']})" for r in rooms])
     total_area = sum(r["area"] for r in rooms)
-    
-    # Базовый системный промпт уже в call_gigachat
     
     if scenario == "tz":
         prompt = f"""
@@ -698,7 +686,6 @@ def generate_document(scenario, rooms, zones, total_equip, room_details, svg_cod
 if not st.session_state.rooms:
     st.warning("⚠️ Добавьте хотя бы одно помещение для расчёта.")
 else:
-    # Проверка: выбраны ли зоны для систем
     zones_defined = (
         st.session_state.video_zones or
         st.session_state.skud_zones or
@@ -709,7 +696,6 @@ else:
     if not zones_defined:
         st.info("ℹ️ Выберите зоны для систем безопасности в разделах выше.")
     
-    # Определяем, какая кнопка нажата
     scenario = None
     if btn_tz:
         scenario = "tz"
@@ -722,7 +708,6 @@ else:
     
     if scenario and zones_defined:
         with st.spinner(f"🔄 Генерация {scenario.upper()}..."):
-            # Собираем зоны
             zones = {
                 "video": st.session_state.video_zones,
                 "skud": st.session_state.skud_zones,
@@ -735,15 +720,12 @@ else:
                 "soue_light": light_exit if 'light_exit' in locals() else True
             }
             
-            # Агрегация
             total_equip, room_details = aggregate_equipment(st.session_state.rooms, zones)
             
-            # SVG (только для РД и Заявки)
             svg_code = None
             if scenario in ["rd", "zayavka"]:
                 svg_code = generate_svg(st.session_state.rooms, room_details)
             
-            # Генерация документа через GigaChat
             document_text = generate_document(
                 scenario,
                 st.session_state.rooms,
@@ -753,7 +735,6 @@ else:
                 svg_code
             )
             
-            # Сохраняем результат
             st.session_state.calc_result = {
                 "scenario": scenario,
                 "document": document_text,
@@ -773,19 +754,15 @@ if st.session_state.calc_result:
     st.markdown("---")
     st.subheader(f"📄 Результат: {res['scenario'].upper()}")
     
-    # Текст документа
     st.text_area("Документ", res["document"], height=400)
     
-    # SVG (если есть)
     if res.get("svg"):
         st.subheader("🖼️ Схема расстановки оборудования")
         st.components.v1.html(res["svg"], height=600)
-        # Скачивание SVG (заглушка)
         b64 = base64.b64encode(res["svg"].encode()).decode()
         href = f'<a href="data:image/svg+xml;base64,{b64}" download="scheme.svg">📥 Скачать SVG</a>'
         st.markdown(href, unsafe_allow_html=True)
     
-    # Сводка по оборудованию
     st.subheader("📊 Сводка по оборудованию")
     for sys, equip in res["total_equip"].items():
         if equip:
