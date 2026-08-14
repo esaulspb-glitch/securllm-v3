@@ -34,11 +34,11 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=2000, te
     auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     auth_headers = {
         "Authorization": f"Basic {api_key}",
-        "RqUID": str(uuid.uuid4()),  # генерируем уникальный идентификатор
+        "RqUID": str(uuid.uuid4()),
         "Content-Type": "application/x-www-form-urlencoded"
     }
     auth_data = {
-        "scope": "GIGACHAT_API_PERS"  # для физических лиц
+        "scope": "GIGACHAT_API_PERS"
     }
 
     try:
@@ -83,11 +83,16 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=2000, te
         return f"Ошибка при генерации текста: {str(e)}"
 
 # ------------------------------------------------------------
-# 3. БОКОВАЯ ПАНЕЛЬ — КЛЮЧИ И НАСТРОЙКИ
+# 3. БОКОВАЯ ПАНЕЛЬ — КЛЮЧ (ТОЛЬКО ИЗ SECRETS)
 # ------------------------------------------------------------
 with st.sidebar:
     st.header("🔐 Настройки")
-    gigachat_key = st.text_input("GigaChat API Key", type="password", value=st.secrets.get("GIGACHAT_KEY", ""))
+    # Ключ загружается из секретов, поле ввода отсутствует
+    try:
+        gigachat_key = st.secrets["GIGACHAT_KEY"]
+    except KeyError:
+        st.error("❌ Не найден GIGACHAT_KEY в .streamlit/secrets.toml")
+        st.stop()
     st.markdown("---")
     st.caption("Прототип V2 • зональный подход • поддержка нескольких помещений")
 
@@ -96,69 +101,62 @@ with st.sidebar:
 # ------------------------------------------------------------
 st.subheader("📐 Экспликация помещений")
 
-col_left, col_right = st.columns([2, 1])
+with st.expander("➕ Добавить помещение", expanded=False):
+    with st.form("add_room_form"):
+        cols = st.columns(4)
+        with cols[0]:
+            room_name = st.text_input("Название", placeholder="касса №1")
+        with cols[1]:
+            length = st.number_input("Длина (м)", min_value=0.5, value=6.0, step=0.5)
+            width = st.number_input("Ширина (м)", min_value=0.5, value=4.0, step=0.5)
+        with cols[2]:
+            height = st.number_input("Высота (м)", min_value=2.0, value=3.0, step=0.1)
+            doors = st.number_input("Двери", min_value=0, value=1, step=1)
+            windows = st.number_input("Окна", min_value=0, value=0, step=1)
+        with cols[3]:
+            st.write(" ")
+            st.write(" ")
+            submitted = st.form_submit_button("✅ Добавить помещение")
+        if submitted and room_name.strip():
+            st.session_state.rooms.append({
+                "name": room_name.strip(),
+                "length": length,
+                "width": width,
+                "height": height,
+                "doors": doors,
+                "windows": windows
+            })
+            st.success(f"Добавлено: {room_name}")
+            st.rerun()
 
-with col_left:
-    with st.expander("➕ Добавить помещение", expanded=False):
-        with st.form("add_room_form"):
-            cols = st.columns(4)
-            with cols[0]:
-                room_name = st.text_input("Название", placeholder="касса №1")
-            with cols[1]:
-                length = st.number_input("Длина (м)", min_value=0.5, value=6.0, step=0.5)
-                width = st.number_input("Ширина (м)", min_value=0.5, value=4.0, step=0.5)
-            with cols[2]:
-                height = st.number_input("Высота (м)", min_value=2.0, value=3.0, step=0.1)
-                doors = st.number_input("Двери", min_value=0, value=1, step=1)
-                windows = st.number_input("Окна", min_value=0, value=0, step=1)
-            with cols[3]:
-                st.write(" ")
-                st.write(" ")
-                submitted = st.form_submit_button("✅ Добавить помещение")
-            if submitted and room_name.strip():
-                st.session_state.rooms.append({
-                    "name": room_name.strip(),
-                    "length": length,
-                    "width": width,
-                    "height": height,
-                    "doors": doors,
-                    "windows": windows
-                })
-                st.success(f"Добавлено: {room_name}")
-                st.rerun()
+# Отображение списка комнат
+if st.session_state.rooms:
+    df_rooms = pd.DataFrame(st.session_state.rooms)
+    st.dataframe(df_rooms, use_container_width=True, hide_index=True)
 
-    # Отображение списка комнат
-    if st.session_state.rooms:
-        df_rooms = pd.DataFrame(st.session_state.rooms)
-        st.dataframe(df_rooms, use_container_width=True, hide_index=True)
-
-        col_clear, col_fill = st.columns(2)
-        with col_clear:
-            if st.button("🗑️ Очистить список"):
-                st.session_state.rooms = []
-                st.rerun()
-        with col_fill:
-            # Быстрое заполнение типовым набором (для теста)
-            if st.button("📥 Заполнить примером (ВСП)"):
-                st.session_state.rooms = [
-                    {"name": "Кассовый зал", "length": 8, "width": 6, "height": 3.2, "doors": 2, "windows": 0},
-                    {"name": "Операционный зал", "length": 12, "width": 8, "height": 3.2, "doors": 1, "windows": 2},
-                    {"name": "Хранилище", "length": 4, "width": 4, "height": 3.0, "doors": 1, "windows": 0},
-                    {"name": "Серверная", "length": 3, "width": 3, "height": 3.0, "doors": 1, "windows": 0},
-                ]
-                st.rerun()
-    else:
-        st.info("Пока нет ни одного помещения. Добавьте комнаты для расчёта.")
-
-with col_right:
-    st.markdown("#### 📌 Выбор зон для систем")
+    col_clear, col_fill = st.columns(2)
+    with col_clear:
+        if st.button("🗑️ Очистить список"):
+            st.session_state.rooms = []
+            st.rerun()
+    with col_fill:
+        if st.button("📥 Заполнить примером (ВСП)"):
+            st.session_state.rooms = [
+                {"name": "Кассовый зал", "length": 8, "width": 6, "height": 3.2, "doors": 2, "windows": 0},
+                {"name": "Операционный зал", "length": 12, "width": 8, "height": 3.2, "doors": 1, "windows": 2},
+                {"name": "Хранилище", "length": 4, "width": 4, "height": 3.0, "doors": 1, "windows": 0},
+                {"name": "Серверная", "length": 3, "width": 3, "height": 3.0, "doors": 1, "windows": 0},
+            ]
+            st.rerun()
+else:
+    st.info("Пока нет ни одного помещения. Добавьте комнаты для расчёта.")
 
 # ------------------------------------------------------------
 # 5. ВЫБОР ЗОН
 # ------------------------------------------------------------
 st.subheader("🎯 Выбор зон для систем безопасности")
 
-# Инициализация состояний для зон (если их нет)
+# Инициализация состояний для зон
 if "video_zones" not in st.session_state:
     st.session_state.video_zones = []
 if "skud_zones" not in st.session_state:
@@ -239,12 +237,12 @@ with st.expander("📢 СОУЭ", expanded=False):
     light_exit = st.checkbox("Световые оповещатели «Выход»", value=True)
 
 # ------------------------------------------------------------
-# 6. РАСЧЁТ (основная логика)
+# 6. РАСЧЁТ
 # ------------------------------------------------------------
 st.markdown("---")
 calc_btn = st.button("🚀 Рассчитать для всех помещений", type="primary", disabled=not st.session_state.rooms)
 
-if calc_btn and gigachat_key:
+if calc_btn:
     with st.spinner("Выполняется расчёт для всех помещений..."):
         # Собираем выбранные зоны в словарь
         zones = {
@@ -262,7 +260,7 @@ if calc_btn and gigachat_key:
             "soue_light": light_exit,
         }
 
-        # --- 6.1 Функции расчёта для одного помещения ---
+        # --- Функции расчёта (те же, что были) ---
         def calc_video(room, video_zones):
             equip = {}
             if "Входная группа" in video_zones:
@@ -355,7 +353,7 @@ if calc_btn and gigachat_key:
                 equip["Световой оповещатель «Выход»"] = equip.get("Световой оповещатель «Выход»", 0) + max(1, floors)
             return {k: v for k, v in equip.items() if v > 0}
 
-        # --- 6.2 Агрегация по всем помещениям ---
+        # --- Агрегация ---
         total_equip = {
             "video": {},
             "skud": {},
@@ -395,14 +393,12 @@ if calc_btn and gigachat_key:
                 "soue": se
             })
 
-        # --- 6.3 Генерация SVG-схемы этажа ---
+        # --- SVG-генерация ---
         def generate_svg(rooms, details):
             scale = 20
             margin = 30
             x_offset = margin
             y_offset = margin
-            max_y = 0
-
             svg_parts = []
             svg_parts.append(f'<svg width="{len(rooms)*200+margin*2}" height="400" xmlns="http://www.w3.org/2000/svg">')
             svg_parts.append('<rect width="100%" height="100%" fill="#f0f4f8" />')
@@ -436,15 +432,13 @@ if calc_btn and gigachat_key:
                     svg_parts.append(f'<rect x="{x}" y="{y}" width="10" height="10" fill="#f1c40f" stroke="#333" />')
                 if room["windows"]:
                     svg_parts.append(f'<rect x="{x+w-10}" y="{y}" width="10" height="10" fill="#3498db" stroke="#333" />')
-                max_y = max(max_y, y + h)
 
             svg_parts.append('</svg>')
             return "\n".join(svg_parts)
 
         svg_code = generate_svg(st.session_state.rooms, room_details)
 
-        # --- 6.4 Генерация документов через GigaChat ---
-        total_area = sum(r["length"]*r["width"] for r in st.session_state.rooms)
+        # --- Генерация документов через GigaChat ---
         rooms_desc = ", ".join([f"{r['name']} ({r['length']}×{r['width']})" for r in st.session_state.rooms])
 
         tz_prompt = f"Составь техническое задание на систему безопасности для ВСП банка. Помещения: {rooms_desc}. Оборудование: {total_equip}. Нормативы: СП 484, Р 102-2024 и др."
@@ -532,10 +526,10 @@ if st.session_state.calc_result:
         href = f'<a href="data:image/svg+xml;base64,{b64}" download="plan.svg">Скачать SVG</a>'
         st.markdown(href, unsafe_allow_html=True)
 
-    # Кнопка экспорта ZIP (отключена до реализации)
+    # Кнопка экспорта ZIP (отключена)
     st.download_button(
         label="📦 Скачать все документы (ZIP)",
-        data=b"",  # временно пустой байтовый литерал
+        data=b"",
         file_name="securllm_package.zip",
         mime="application/zip",
         disabled=True
