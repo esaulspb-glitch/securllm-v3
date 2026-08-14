@@ -224,13 +224,14 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
         "Content-Type": "application/json"
     }
 
+    # ПРАВИЛЬНЫЙ ФОРМАТ: attachments — это МАССИВ СТРОК с ID файлов
     payload = {
         "model": "GigaChat-2-Pro",
         "messages": [
             {
                 "role": "user",
                 "content": prompt,
-                "attachments": [{"id": file_id}]  # массив объектов с id
+                "attachments": [file_id]  # <-- просто строка с ID, а не объект {"id": ...}
             }
         ],
         "temperature": 0.2,
@@ -241,8 +242,26 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
     response.raise_for_status()
     result = response.json()
     return result["choices"][0]["message"]["content"]
+    }
+
+    response = requests.post(chat_url, headers=headers, json=payload, timeout=120, verify=False)
+    response.raise_for_status()
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
 
 def recognize_floor_plan(image_bytes, api_key):
+    # ... (код загрузки файла) ...
+    try:
+        file_id = upload_file_to_gigachat(image_bytes, "floor_plan.png", api_key)
+        st.info(f"✅ Файл загружен, ID: {file_id}")
+
+        response_text = call_gigachat_vision_with_file(prompt, file_id, api_key)
+        # ... (парсинг JSON) ...
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP ошибка: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.text_area("Тело ответа сервера:", e.response.text, height=200)
+        return []
     """
     Распознаёт план помещения: загружает изображение, отправляет запрос с file_id.
     Возвращает список помещений с параметрами.
