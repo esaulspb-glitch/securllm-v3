@@ -185,9 +185,19 @@ def upload_file_to_gigachat(file_bytes, file_name, api_key):
     # 2. Загружаем файл
     upload_url = "https://api.giga.chat/v1/files"
     headers = {"Authorization": f"Bearer {access_token}"}
+    
+    # Обязательный параметр purpose="general"
+    data = {"purpose": "general"}
     files = {"file": (file_name, file_bytes, "image/png")}
 
-    response = requests.post(upload_url, headers=headers, files=files, timeout=30, verify=False)
+    response = requests.post(
+        upload_url,
+        headers=headers,
+        data=data,
+        files=files,
+        timeout=30,
+        verify=False
+    )
     response.raise_for_status()
     return response.json()["id"]
 
