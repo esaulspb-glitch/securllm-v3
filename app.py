@@ -4,8 +4,9 @@ import json
 import requests
 import io
 import base64
-from datetime import datetime
+import uuid
 import math
+from datetime import datetime
 
 # ------------------------------------------------------------
 # 1. НАСТРОЙКА СТРАНИЦЫ И СЕССИИ
@@ -20,7 +21,69 @@ if "calc_result" not in st.session_state:
     st.session_state.calc_result = None
 
 # ------------------------------------------------------------
-# 2. БОКОВАЯ ПАНЕЛЬ — КЛЮЧИ И НАСТРОЙКИ (оставляем как было)
+# 2. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API
+# ------------------------------------------------------------
+def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=2000, temperature=0.7):
+    """
+    Отправляет запрос к GigaChat API и возвращает сгенерированный текст.
+    """
+    if not api_key:
+        return "Ошибка: не указан API-ключ GigaChat."
+
+    # 1. Получение токена доступа (OAuth 2.0)
+    auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    auth_headers = {
+        "Authorization": f"Basic {api_key}",
+        "RqUID": str(uuid.uuid4()),  # генерируем уникальный идентификатор
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    auth_data = {
+        "scope": "GIGACHAT_API_PERS"  # для физических лиц
+    }
+
+    try:
+        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10)
+        auth_response.raise_for_status()
+        token_data = auth_response.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return f"Ошибка получения токена: {token_data}"
+    except Exception as e:
+        return f"Ошибка авторизации GigaChat: {str(e)}"
+
+    # 2. Отправка запроса к модели
+    chat_url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+    chat_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    chat_payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Ты — эксперт по системам физической безопасности и противопожарной защиты. Отвечай строго по делу, используй нормативные документы."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False
+    }
+
+    try:
+        response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"]
+        else:
+            return f"Неожиданный формат ответа: {result}"
+    except requests.exceptions.Timeout:
+        return "Ошибка: таймаут при обращении к GigaChat."
+    except Exception as e:
+        return f"Ошибка при генерации текста: {str(e)}"
+
+# ------------------------------------------------------------
+# 3. БОКОВАЯ ПАНЕЛЬ — КЛЮЧИ И НАСТРОЙКИ
 # ------------------------------------------------------------
 with st.sidebar:
     st.header("🔐 Настройки")
@@ -29,7 +92,7 @@ with st.sidebar:
     st.caption("Прототип V2 • зональный подход • поддержка нескольких помещений")
 
 # ------------------------------------------------------------
-# 3. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ
+# 4. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ
 # ------------------------------------------------------------
 st.subheader("📐 Экспликация помещений")
 
@@ -89,11 +152,9 @@ with col_left:
 
 with col_right:
     st.markdown("#### 📌 Выбор зон для систем")
-    # Здесь мы оставляем существующие expander-ы для зон (они были в прототипе)
-    # Их код приведён ниже в секции "ВЫБОР ЗОН"
 
 # ------------------------------------------------------------
-# 4. ВЫБОР ЗОН (сохраняем оригинальный интерфейс)
+# 5. ВЫБОР ЗОН
 # ------------------------------------------------------------
 st.subheader("🎯 Выбор зон для систем безопасности")
 
@@ -178,7 +239,7 @@ with st.expander("📢 СОУЭ", expanded=False):
     light_exit = st.checkbox("Световые оповещатели «Выход»", value=True)
 
 # ------------------------------------------------------------
-# 5. РАСЧЁТ (основная кнопка)
+# 6. РАСЧЁТ (основная логика)
 # ------------------------------------------------------------
 st.markdown("---")
 calc_btn = st.button("🚀 Рассчитать для всех помещений", type="primary", disabled=not st.session_state.rooms)
@@ -201,7 +262,7 @@ if calc_btn and gigachat_key:
             "soue_light": light_exit,
         }
 
-        # --- 5.1 Функции расчёта для одного помещения ---
+        # --- 6.1 Функции расчёта для одного помещения ---
         def calc_video(room, video_zones):
             equip = {}
             if "Входная группа" in video_zones:
@@ -209,10 +270,8 @@ if calc_btn and gigachat_key:
                 if room["windows"] > 0:
                     equip["Уличная LTV-3RN6481-R"] = equip.get("Уличная LTV-3RN6481-R", 0) + 1
             if "Кассовый узел (каждое место)" in video_zones:
-                # здесь можно уточнить количество по числу рабочих мест (пока 1)
                 equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
             if "Операционный зал" in video_zones:
-                # по площади: 1 камера на 20 кв.м
                 area = room["length"] * room["width"]
                 cnt = max(1, math.ceil(area / 20))
                 equip["Купол LTV-3CNB40-F28"] = equip.get("Купол LTV-3CNB40-F28", 0) + cnt
@@ -226,7 +285,6 @@ if calc_btn and gigachat_key:
                 equip["Уличная LTV-3RN6481-R"] = equip.get("Уличная LTV-3RN6481-R", 0) + 1
             if "Банкоматы" in video_zones:
                 equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-            # Убираем нулевые
             return {k: v for k, v in equip.items() if v > 0}
 
         def calc_skud(room, skud_zones, ident_type, two_factor):
@@ -253,7 +311,6 @@ if calc_btn and gigachat_key:
         def calc_ohr(room, ohr_zones):
             equip = {}
             if "Периметр (двери/окна)" in ohr_zones:
-                # на каждую дверь/окно
                 cnt = room["doors"] + room["windows"]
                 equip["Извещатель «Стекло-3»"] = equip.get("Извещатель «Стекло-3»", 0) + cnt
             if "Объём (движение)" in ohr_zones:
@@ -270,21 +327,18 @@ if calc_btn and gigachat_key:
         def calc_fire(room, fire_types, suspended, beams, vent_dist):
             equip = {}
             area = room["length"] * room["width"]
-            # Норматив: 1 извещатель на ~20 кв.м (с учётом коэффициентов)
             coeff = 1.0
             if suspended:
                 coeff *= 1.2
             if beams:
                 coeff *= 1.3
             base_cnt = max(1, math.ceil(area / 20 * coeff))
-            # Распределяем по типам
             if "Дымовые извещатели" in fire_types:
                 equip["Дымовой ИП 212-141"] = equip.get("Дымовой ИП 212-141", 0) + base_cnt
             if "Тепловые извещатели" in fire_types:
                 equip["Тепловой ИП 101-3А"] = equip.get("Тепловой ИП 101-3А", 0) + base_cnt
             if "Комбинированные извещатели" in fire_types:
                 equip["Комбинированный ИП 212/101"] = equip.get("Комбинированный ИП 212/101", 0) + base_cnt
-            # Приборы управления
             equip["ППКУП «Сириус»"] = equip.get("ППКУП «Сириус»", 0) + 1
             equip["С2000-КДЛ"] = equip.get("С2000-КДЛ", 0) + 1
             return {k: v for k, v in equip.items() if v > 0}
@@ -292,7 +346,6 @@ if calc_btn and gigachat_key:
         def calc_soue(room, soue_types, floors, light_exit):
             equip = {}
             area = room["length"] * room["width"]
-            # Оповещатели: 1 на 30 кв.м
             cnt = max(1, math.ceil(area / 30))
             if "Звуковое оповещение" in soue_types:
                 equip["Оповещатель «Рупор»"] = equip.get("Оповещатель «Рупор»", 0) + cnt
@@ -302,7 +355,7 @@ if calc_btn and gigachat_key:
                 equip["Световой оповещатель «Выход»"] = equip.get("Световой оповещатель «Выход»", 0) + max(1, floors)
             return {k: v for k, v in equip.items() if v > 0}
 
-        # --- 5.2 Агрегация по всем помещениям ---
+        # --- 6.2 Агрегация по всем помещениям ---
         total_equip = {
             "video": {},
             "skud": {},
@@ -310,31 +363,29 @@ if calc_btn and gigachat_key:
             "fire": {},
             "soue": {}
         }
-        room_details = []  # для детализации по каждой комнате
+        room_details = []
 
-        for idx, room in enumerate(st.session_state.rooms):
-            # Видео
+        for room in st.session_state.rooms:
             v = calc_video(room, zones["video"])
             for k, cnt in v.items():
                 total_equip["video"][k] = total_equip["video"].get(k, 0) + cnt
-            # СКУД
+
             s = calc_skud(room, zones["skud"], zones["skud_ident"], zones["skud_2fa"])
             for k, cnt in s.items():
                 total_equip["skud"][k] = total_equip["skud"].get(k, 0) + cnt
-            # Охранка
+
             o = calc_ohr(room, zones["ohr"])
             for k, cnt in o.items():
                 total_equip["ohr"][k] = total_equip["ohr"].get(k, 0) + cnt
-            # Пожар
+
             f = calc_fire(room, zones["fire"], zones["fire_suspended"], zones["fire_beams"], zones["fire_vent_dist"])
             for k, cnt in f.items():
                 total_equip["fire"][k] = total_equip["fire"].get(k, 0) + cnt
-            # СОУЭ
+
             se = calc_soue(room, zones["soue"], zones["soue_floors"], zones["soue_light"])
             for k, cnt in se.items():
                 total_equip["soue"][k] = total_equip["soue"].get(k, 0) + cnt
 
-            # Сохраняем детали по комнате (для SVG)
             room_details.append({
                 "name": room["name"],
                 "video": v,
@@ -344,9 +395,8 @@ if calc_btn and gigachat_key:
                 "soue": se
             })
 
-        # --- 5.3 Генерация SVG-схемы этажа ---
+        # --- 6.3 Генерация SVG-схемы этажа ---
         def generate_svg(rooms, details):
-            # Простая раскладка комнат в ряд, масштаб 1:20 (1 м = 20 пикселей)
             scale = 20
             margin = 30
             x_offset = margin
@@ -362,27 +412,26 @@ if calc_btn and gigachat_key:
                 w = room["length"] * scale
                 h = room["width"] * scale
                 x = x_offset
-                y = y_offset + (idx % 2) * (h + 10)  # чередование рядов
+                y = y_offset + (idx % 2) * (h + 10)
                 if idx % 2 == 0:
                     x_offset += w + 20
                 else:
                     x_offset = margin
-                # Комната
+
                 svg_parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="#ffffff" stroke="#2c3e50" stroke-width="2" />')
                 svg_parts.append(f'<text x="{x+10}" y="{y+20}" font-weight="bold">{room["name"]}</text>')
                 svg_parts.append(f'<text x="{x+10}" y="{y+40}">{room["length"]}×{room["width"]} м</text>')
-                # Оборудование (иконки)
+
                 icon_x = x + 10
                 icon_y = y + 60
                 for sys, equip_list in det.items():
                     if equip_list:
                         for eq_name, cnt in equip_list.items():
-                            # Упрощённо: рисуем кружок с первой буквой системы
                             color = {"video": "#3498db", "skud": "#2ecc71", "ohr": "#e67e22", "fire": "#e74c3c", "soue": "#9b59b6"}.get(sys, "#95a5a6")
                             svg_parts.append(f'<circle cx="{icon_x}" cy="{icon_y}" r="6" fill="{color}" />')
                             svg_parts.append(f'<text x="{icon_x+10}" y="{icon_y+4}" font-size="10">{eq_name[:3]} {cnt}</text>')
                             icon_y += 20
-                # Отметки дверей/окон
+
                 if room["doors"]:
                     svg_parts.append(f'<rect x="{x}" y="{y}" width="10" height="10" fill="#f1c40f" stroke="#333" />')
                 if room["windows"]:
@@ -394,34 +443,22 @@ if calc_btn and gigachat_key:
 
         svg_code = generate_svg(st.session_state.rooms, room_details)
 
-        # --- 5.4 Генерация ТЗ, сметы, проекта через GigaChat ---
-        def call_gigachat(prompt, key):
-            # Заглушка — реальный вызов API GigaChat
-            # Здесь нужно вставить ваш код вызова
-            # Ответим просто текстом-заглушкой для демонстрации
-            return f"Сгенерированный текст на основе запроса: {prompt[:100]}..."
-
-        # Формируем общее описание объекта
+        # --- 6.4 Генерация документов через GigaChat ---
         total_area = sum(r["length"]*r["width"] for r in st.session_state.rooms)
         rooms_desc = ", ".join([f"{r['name']} ({r['length']}×{r['width']})" for r in st.session_state.rooms])
 
-        # ТЗ
         tz_prompt = f"Составь техническое задание на систему безопасности для ВСП банка. Помещения: {rooms_desc}. Оборудование: {total_equip}. Нормативы: СП 484, Р 102-2024 и др."
         tz_text = call_gigachat(tz_prompt, gigachat_key)
 
-        # Смета
         smeta_prompt = f"Составь смету на оборудование для объекта: {total_equip}. Укажи примерные цены."
         smeta_text = call_gigachat(smeta_prompt, gigachat_key)
 
-        # Проект
         proj_prompt = f"Напиши пояснительную записку к проекту системы безопасности для ВСП с перечнем работ и оборудования."
         proj_text = call_gigachat(proj_prompt, gigachat_key)
 
-        # Заявка
         zayavka_prompt = f"Сформируй заявку на выполнение работ по установке системы безопасности на объекте."
         zayavka_text = call_gigachat(zayavka_prompt, gigachat_key)
 
-        # Сохраняем результат
         st.session_state.calc_result = {
             "total_equip": total_equip,
             "tz": tz_text,
@@ -436,12 +473,11 @@ if calc_btn and gigachat_key:
         st.success("Расчёт выполнен!")
 
 # ------------------------------------------------------------
-# 6. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
+# 7. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
 # ------------------------------------------------------------
 if st.session_state.calc_result:
     res = st.session_state.calc_result
 
-    # Вкладки
     tabs = st.tabs(["📊 Сводка", "📹 Видео", "🚪 СКУД", "🔔 Охранка", "🔥 Пожар", "📢 СОУЭ", "📄 ТЗ", "💰 Смета", "📐 Проект", "📋 Заявка", "🖼️ SVG-схема"])
 
     with tabs[0]:
@@ -456,7 +492,6 @@ if st.session_state.calc_result:
         with col2:
             st.dataframe(pd.DataFrame(res["rooms"]), use_container_width=True)
 
-    # Табы для каждой системы показывают детали оборудования
     sys_tabs = {
         "📹 Видео": "video",
         "🚪 СКУД": "skud",
@@ -465,7 +500,8 @@ if st.session_state.calc_result:
         "📢 СОУЭ": "soue"
     }
     for tab_name, sys_key in sys_tabs.items():
-        with tabs[list(sys_tabs.keys()).index(tab_name)+1]:  # +1 потому что первый таб - сводка
+        idx = list(sys_tabs.keys()).index(tab_name) + 1
+        with tabs[idx]:
             equip_dict = res["total_equip"].get(sys_key, {})
             if equip_dict:
                 df = pd.DataFrame(list(equip_dict.items()), columns=["Тип", "Количество"])
@@ -473,34 +509,33 @@ if st.session_state.calc_result:
             else:
                 st.info("Оборудование для этой системы не выбрано.")
 
-    with tabs[6]:  # ТЗ
+    with tabs[6]:
         st.subheader("Техническое задание")
         st.text_area("ТЗ", res["tz"], height=300)
 
-    with tabs[7]:  # Смета
+    with tabs[7]:
         st.subheader("Смета")
         st.text_area("Смета", res["smeta"], height=300)
 
-    with tabs[8]:  # Проект
+    with tabs[8]:
         st.subheader("Пояснительная записка")
         st.text_area("Проект", res["project"], height=300)
 
-    with tabs[9]:  # Заявка
+    with tabs[9]:
         st.subheader("Заявка на исполнение")
         st.text_area("Заявка", res["zayavka"], height=300)
 
-    with tabs[10]:  # SVG
+    with tabs[10]:
         st.subheader("План расстановки оборудования (SVG)")
         st.components.v1.html(res["svg"], height=500)
-        # Кнопка скачать SVG
         b64 = base64.b64encode(res["svg"].encode()).decode()
         href = f'<a href="data:image/svg+xml;base64,{b64}" download="plan.svg">Скачать SVG</a>'
         st.markdown(href, unsafe_allow_html=True)
 
-    # Кнопка экспорта ZIP (заглушка)
+    # Кнопка экспорта ZIP (отключена до реализации)
     st.download_button(
         label="📦 Скачать все документы (ZIP)",
-        data=b"заглушка",  # здесь должен быть реальный ZIP
+        data=b"",  # временно пустой байтовый литерал
         file_name="securllm_package.zip",
         mime="application/zip",
         disabled=True
