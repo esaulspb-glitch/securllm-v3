@@ -224,14 +224,13 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
         "Content-Type": "application/json"
     }
 
-    # ПРАВИЛЬНЫЙ ФОРМАТ: attachments — это МАССИВ СТРОК с ID файлов
     payload = {
         "model": "GigaChat-2-Pro",
         "messages": [
             {
                 "role": "user",
                 "content": prompt,
-                "attachments": [file_id]  # <-- просто строка с ID, а не объект {"id": ...}
+                "attachments": [file_id]  # МАССИВ СТРОК с ID файла
             }
         ],
         "temperature": 0.2,
@@ -242,26 +241,8 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
     response.raise_for_status()
     result = response.json()
     return result["choices"][0]["message"]["content"]
-    }
-
-    response = requests.post(chat_url, headers=headers, json=payload, timeout=120, verify=False)
-    response.raise_for_status()
-    result = response.json()
-    return result["choices"][0]["message"]["content"]
 
 def recognize_floor_plan(image_bytes, api_key):
-    # ... (код загрузки файла) ...
-    try:
-        file_id = upload_file_to_gigachat(image_bytes, "floor_plan.png", api_key)
-        st.info(f"✅ Файл загружен, ID: {file_id}")
-
-        response_text = call_gigachat_vision_with_file(prompt, file_id, api_key)
-        # ... (парсинг JSON) ...
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP ошибка: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            st.text_area("Тело ответа сервера:", e.response.text, height=200)
-        return []
     """
     Распознаёт план помещения: загружает изображение, отправляет запрос с file_id.
     Возвращает список помещений с параметрами.
@@ -290,31 +271,22 @@ def recognize_floor_plan(image_bytes, api_key):
     try:
         # 1. Загружаем файл
         file_id = upload_file_to_gigachat(image_bytes, "floor_plan.png", api_key)
-        st.info(f"✅ Файл загружен, ID: {file_id}")  # отладка
-
         # 2. Отправляем запрос с file_id
         response_text = call_gigachat_vision_with_file(prompt, file_id, api_key)
-        
-        # 3. Пробуем извлечь JSON
+        # 3. Парсим JSON
         import re
         json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
         if json_match:
             rooms = json.loads(json_match.group())
         else:
             rooms = json.loads(response_text)
-        
-        if not isinstance(rooms, list):
-            raise ValueError("Ответ не является массивом")
         return rooms
-        
     except json.JSONDecodeError as e:
         st.error(f"Ошибка парсинга JSON: {e}")
-        st.text_area("Сырой ответ модели (не JSON):", response_text, height=200)
+        st.text_area("Сырой ответ модели (не JSON):", response_text if 'response_text' in locals() else "", height=200)
         return []
     except Exception as e:
         st.error(f"Ошибка распознавания: {str(e)}")
-        if 'response_text' in locals():
-            st.text_area("Сырой ответ модели:", response_text, height=200)
         return []
 
 # ------------------------------------------------------------
