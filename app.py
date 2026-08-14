@@ -103,10 +103,15 @@ except Exception:
 # ------------------------------------------------------------
 # 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API (с фиксом SSL и URL)
 # ------------------------------------------------------------
-def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, temperature=0.7):
+def call_gigachat_vision(prompt, image_base64, api_key):
+    """
+    Отправляет изображение в GigaChat через мультимодальный API.
+    Использует модель GigaChat-2-Max.
+    """
     if not api_key:
         return "Ошибка: не указан API-ключ GigaChat."
 
+    # Авторизация
     auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     auth_headers = {
         "Authorization": f"Basic {api_key}",
@@ -123,35 +128,32 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
     except Exception as e:
         return f"Ошибка авторизации GigaChat: {str(e)}"
 
-    chat_url = "https://api.giga.chat/v1/chat/completions"
-    chat_headers = {
+    # Запрос к мультимодальной модели
+    vision_url = "https://api.giga.chat/v1/chat/completions"
+    vision_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-    chat_payload = {
-        "model": model,
+    
+    vision_payload = {
+        "model": "GigaChat-2-Max",  # изменено с GigaChat-Vision
         "messages": [
-            {"role": "system", "content": """Ты — эксперт по системам физической безопасности и противопожарной защиты для объектов ПАО Сбербанк.
-Приоритетная нормативная база (от высшего к низшему):
-1. Сборник стандартов по комплексной безопасности № 4461 (ПАО Сбербанк).
-2. ФЗ-123, ФЗ-384, ФЗ-69, ФЗ-152, ФЗ-187.
-3. Р 102-2024 (Росгвардия), СП 484.1311500.2020 (с Изм.1), СП 3.13130.2026, СП 76.
-4. ГОСТ Р 57580.1, 57580.2, 57580.4, Положения ЦБ РФ 851-П, 850-П, 382-П.
-5. ГОСТ Р 51558-2014, ГОСТ Р 51241-2008, ГОСТ 31565-2012, ГОСТ Р 70444-2022, ГОСТ 21.110, ГОСТ Р 21.1101.
-6. ПУЭ, СП 60, СП 134.
-7. Документация производителей (Болид, ТвинПро, ЦРТ, LTV).
-
-При генерации решений ссылайся на конкретные пункты документов.
-Отвечай строго по делу, используй профессиональную терминологию."""},
-            {"role": "user", "content": prompt}
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
+                ]
+            }
         ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
+        "temperature": 0.2,
+        "max_tokens": 2000,
         "stream": False
     }
+    
     try:
-        response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=90, verify=False)
+        response = requests.post(vision_url, headers=vision_headers, json=vision_payload, timeout=120, verify=False)
         response.raise_for_status()
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
@@ -162,7 +164,6 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
         return "Ошибка: таймаут при обращении к GigaChat."
     except Exception as e:
         return f"Ошибка при генерации текста: {str(e)}"
-
 # ------------------------------------------------------------
 # 3.1. ПРОВЕРКА ДОСТУПНЫХ МОДЕЛЕЙ GIGACHAT
 # ------------------------------------------------------------
