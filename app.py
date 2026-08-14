@@ -186,7 +186,7 @@ def upload_file_to_gigachat(file_bytes, file_name, api_key):
     upload_url = "https://api.giga.chat/v1/files"
     headers = {"Authorization": f"Bearer {access_token}"}
     
-    # Обязательный параметр purpose="general"
+    # Обязательный параметр purpose
     data = {"purpose": "general"}
     files = {"file": (file_name, file_bytes, "image/png")}
 
@@ -218,7 +218,6 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
     auth_response.raise_for_status()
     access_token = auth_response.json().get("access_token")
 
-    # Запрос к модели с прикреплённым файлом
     chat_url = "https://api.giga.chat/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -231,7 +230,7 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
             {
                 "role": "user",
                 "content": prompt,
-                "attachments": [file_id]
+                "attachments": [{"id": file_id}]  # массив объектов с id
             }
         ],
         "temperature": 0.2,
@@ -272,18 +271,31 @@ def recognize_floor_plan(image_bytes, api_key):
     try:
         # 1. Загружаем файл
         file_id = upload_file_to_gigachat(image_bytes, "floor_plan.png", api_key)
+        st.info(f"✅ Файл загружен, ID: {file_id}")  # отладка
+
         # 2. Отправляем запрос с file_id
         response_text = call_gigachat_vision_with_file(prompt, file_id, api_key)
-        # 3. Парсим JSON
+        
+        # 3. Пробуем извлечь JSON
         import re
         json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
         if json_match:
             rooms = json.loads(json_match.group())
         else:
             rooms = json.loads(response_text)
+        
+        if not isinstance(rooms, list):
+            raise ValueError("Ответ не является массивом")
         return rooms
+        
+    except json.JSONDecodeError as e:
+        st.error(f"Ошибка парсинга JSON: {e}")
+        st.text_area("Сырой ответ модели (не JSON):", response_text, height=200)
+        return []
     except Exception as e:
-        st.error(f"Ошибка распознавания чертежа: {str(e)}")
+        st.error(f"Ошибка распознавания: {str(e)}")
+        if 'response_text' in locals():
+            st.text_area("Сырой ответ модели:", response_text, height=200)
         return []
 
 # ------------------------------------------------------------
