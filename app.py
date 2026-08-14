@@ -231,7 +231,7 @@ def call_gigachat_vision_with_file(prompt, file_id, api_key):
             {
                 "role": "user",
                 "content": prompt,
-                "attachments": [file_id]
+                "attachments": [file_id]  # <-- массив строк
             }
         ],
         "temperature": 0.2,
@@ -267,8 +267,8 @@ def recognize_floor_plan(image_bytes, api_key):
 [
     {
         "name": "название помещения",
-        "length": длина в метрах (число),
-        "width": ширина в метрах (число),
+        "length": длина в миллиметрах (число),
+        "width": ширина в миллиметрах (число),
         "doors": количество дверей (число),
         "windows": количество окон (число),
         "purpose": "назначение"
@@ -299,29 +299,45 @@ def recognize_floor_plan(image_bytes, api_key):
             st.text_area("Сырой ответ:", response_text, height=200)
             return []
 
-        # 4. Нормализация данных: добавляем недостающие поля
+        # 4. Нормализация данных
         default_room = {
-            "height": 3.0,
+            "height": 3000,
             "floor": 1,
             "occupancy": 0,
             "has_valuables": False,
             "is_critical": False,
             "fire_category": "В",
             "has_suspended": False,
-            "has_beams": False
+            "has_beams": False,
+            "beam_spacing": 0,
+            "beam_orientation": "нет"
         }
         for room in rooms:
+            # Преобразование размеров из мм в м, если значение > 50
+            if "length" in room and room["length"] and room["length"] > 50:
+                room["length"] = room["length"]  # уже в мм
+            elif "length" in room and room["length"] and room["length"] <= 50:
+                room["length"] = room["length"] * 1000  # переводим метры в мм
+            if "width" in room and room["width"] and room["width"] > 50:
+                room["width"] = room["width"]
+            elif "width" in room and room["width"] and room["width"] <= 50:
+                room["width"] = room["width"] * 1000
+
+            # Заполняем недостающие поля
             for key, value in default_room.items():
                 if key not in room or room[key] is None:
                     room[key] = value
-            # Вычисляем area
+
+            # Вычисляем площадь в м²
             if "length" in room and "width" in room and room["length"] and room["width"]:
-                room["area"] = room["length"] * room["width"]
+                room["area"] = (room["length"] * room["width"]) / 1000000
             else:
                 room["area"] = 0
+
             # Преобразуем двери и окна в int
             room["doors"] = int(room.get("doors", 0) or 0)
             room["windows"] = int(room.get("windows", 0) or 0)
+
         return rooms
 
     except json.JSONDecodeError as e:
@@ -343,6 +359,8 @@ if "calc_result" not in st.session_state:
     st.session_state.calc_result = None
 if "manual_mode" not in st.session_state:
     st.session_state.manual_mode = False
+if "edit_index" not in st.session_state:
+    st.session_state.edit_index = None
 
 # ------------------------------------------------------------
 # 6. ЗАГРУЗКА ЧЕРТЕЖА (реальный ML-модуль)
@@ -362,20 +380,21 @@ if uploaded_file is not None:
         
         if recognized_rooms and len(recognized_rooms) > 0:
             st.success(f"✅ Распознано {len(recognized_rooms)} помещений")
-            df_recognized = pd.DataFrame(recognized_rooms)
-            # Показываем только основные колонки (все они есть после нормализации)
+            df_rec = pd.DataFrame(recognized_rooms)
+            # Показываем основные поля
             display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
-            existing_cols = [col for col in display_cols if col in df_recognized.columns]
-            st.dataframe(df_recognized[existing_cols], use_container_width=True)
+            existing_cols = [col for col in display_cols if col in df_rec.columns]
+            st.dataframe(df_rec[existing_cols], use_container_width=True)
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("📥 Применить распознанные данные", key="apply_recognized", use_container_width=True):
+                if st.button("📥 Применить и заменить текущие помещения", key="apply_replace", use_container_width=True):
                     st.session_state.rooms = recognized_rooms
                     st.session_state.manual_mode = False
                     st.rerun()
             with col2:
-                if st.button("✏️ Редактировать вручную", key="edit_recognized", use_container_width=True):
+                if st.button("✏️ Редактировать вручную", key="edit_recognized_rooms", use_container_width=True):
+                    st.session_state.rooms = recognized_rooms
                     st.session_state.manual_mode = True
                     st.rerun()
         else:
@@ -392,13 +411,13 @@ if st.session_state.manual_mode or not st.session_state.rooms:
 
     with st.expander("➕ Добавить помещение", expanded=False):
         with st.form("add_room_form"):
-            st.markdown("**Основные параметры**")
+            st.markdown("**Основные параметры (в миллиметрах)**")
             col1, col2, col3 = st.columns(3)
             with col1:
                 room_name = st.text_input("Название", placeholder="касса №1")
-                length = st.number_input("Длина (м)", min_value=0.5, value=6.0, step=0.5)
-                width = st.number_input("Ширина (м)", min_value=0.5, value=4.0, step=0.5)
-                height = st.number_input("Высота потолка (м)", min_value=2.0, value=3.0, step=0.1)
+                length = st.number_input("Длина (мм)", min_value=100, value=6000, step=100)
+                width = st.number_input("Ширина (мм)", min_value=100, value=4000, step=100)
+                height = st.number_input("Высота потолка (мм)", min_value=2000, value=3000, step=100)
                 floor = st.number_input("Этаж", min_value=1, value=1, step=1)
             with col2:
                 doors = st.number_input("Двери", min_value=0, value=1, step=1)
@@ -414,6 +433,15 @@ if st.session_state.manual_mode or not st.session_state.rooms:
                 )
                 has_suspended = st.checkbox("Подвесной потолок")
                 has_beams = st.checkbox("Балки > 400 мм")
+                if has_beams:
+                    beam_spacing = st.number_input("Шаг балок (мм)", min_value=100, value=1500, step=100)
+                    beam_orientation = st.selectbox(
+                        "Ориентация балок",
+                        ["вдоль", "поперёк", "не знаю"]
+                    )
+                else:
+                    beam_spacing = 0
+                    beam_orientation = "нет"
                 purpose_type = st.selectbox(
                     "Назначение помещения",
                     ["Кассовый узел", "Операционный зал", "Серверная", "Хранилище",
@@ -431,7 +459,7 @@ if st.session_state.manual_mode or not st.session_state.rooms:
                     "length": length,
                     "width": width,
                     "height": height,
-                    "area": length * width,
+                    "area": (length * width) / 1000000,  # м²
                     "floor": floor,
                     "doors": doors,
                     "windows": windows,
@@ -441,27 +469,20 @@ if st.session_state.manual_mode or not st.session_state.rooms:
                     "fire_category": fire_category,
                     "has_suspended": has_suspended,
                     "has_beams": has_beams,
+                    "beam_spacing": beam_spacing,
+                    "beam_orientation": beam_orientation,
                     "purpose": purpose
                 })
                 st.success(f"✅ Добавлено: {room_name}")
                 st.rerun()
 
-# Отображение списка комнат (безопасное, с проверкой колонок)
+# Отображение списка комнат с редактированием
 if st.session_state.rooms:
+    st.subheader("📋 Список помещений")
     df_rooms = pd.DataFrame(st.session_state.rooms)
-    
-    # Убедимся, что все нужные колонки есть
-    required_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
-    for col in required_cols:
-        if col not in df_rooms.columns:
-            df_rooms[col] = None  # или 0 для числовых
-    
-    # Пересчитаем area, если длина и ширина есть
-    if "length" in df_rooms.columns and "width" in df_rooms.columns:
-        df_rooms["area"] = df_rooms["length"] * df_rooms["width"]
-    
-    # Отображаем только существующие колонки
-    existing_cols = [col for col in required_cols if col in df_rooms.columns]
+    # Безопасное отображение: проверяем колонки
+    display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
+    existing_cols = [col for col in display_cols if col in df_rooms.columns]
     st.dataframe(df_rooms[existing_cols], use_container_width=True, hide_index=True)
 
     col_clear, col_fill = st.columns(2)
@@ -473,21 +494,90 @@ if st.session_state.rooms:
     with col_fill:
         if st.button("📥 Заполнить примером (ВСП)", key="fill_example"):
             st.session_state.rooms = [
-                {"name": "Кассовый зал", "length": 8, "width": 6, "height": 3.2, "area": 48, "floor": 1,
+                {"name": "Кассовый зал", "length": 8000, "width": 6000, "height": 3200, "area": 48.0, "floor": 1,
                  "doors": 2, "windows": 0, "occupancy": 10, "has_valuables": True, "is_critical": False,
-                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "Кассовый узел"},
-                {"name": "Операционный зал", "length": 12, "width": 8, "height": 3.2, "area": 96, "floor": 1,
+                 "fire_category": "В", "has_suspended": False, "has_beams": False, "beam_spacing": 0, "beam_orientation": "нет", "purpose": "Кассовый узел"},
+                {"name": "Операционный зал", "length": 12000, "width": 8000, "height": 3200, "area": 96.0, "floor": 1,
                  "doors": 1, "windows": 2, "occupancy": 25, "has_valuables": False, "is_critical": False,
-                 "fire_category": "В", "has_suspended": True, "has_beams": False, "purpose": "Операционный зал"},
-                {"name": "Хранилище", "length": 4, "width": 4, "height": 3.0, "area": 16, "floor": 1,
+                 "fire_category": "В", "has_suspended": True, "has_beams": False, "beam_spacing": 0, "beam_orientation": "нет", "purpose": "Операционный зал"},
+                {"name": "Хранилище", "length": 4000, "width": 4000, "height": 3000, "area": 16.0, "floor": 1,
                  "doors": 1, "windows": 0, "occupancy": 0, "has_valuables": True, "is_critical": True,
-                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "Хранилище"},
-                {"name": "Серверная", "length": 3, "width": 3, "height": 3.0, "area": 9, "floor": 1,
+                 "fire_category": "В", "has_suspended": False, "has_beams": False, "beam_spacing": 0, "beam_orientation": "нет", "purpose": "Хранилище"},
+                {"name": "Серверная", "length": 3000, "width": 3000, "height": 3000, "area": 9.0, "floor": 1,
                  "doors": 1, "windows": 0, "occupancy": 2, "has_valuables": False, "is_critical": True,
-                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "Серверная"},
+                 "fire_category": "В", "has_suspended": False, "has_beams": False, "beam_spacing": 0, "beam_orientation": "нет", "purpose": "Серверная"},
             ]
             st.session_state.manual_mode = False
             st.rerun()
+
+    # Редактирование помещения
+    if st.session_state.edit_index is not None:
+        idx = st.session_state.edit_index
+        room = st.session_state.rooms[idx]
+        with st.expander(f"✏️ Редактирование: {room['name']}", expanded=True):
+            with st.form(f"edit_form_{idx}"):
+                st.markdown("**Редактирование параметров (в мм)**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    new_name = st.text_input("Название", value=room.get("name", ""))
+                    new_length = st.number_input("Длина (мм)", value=float(room.get("length", 0)), step=100)
+                    new_width = st.number_input("Ширина (мм)", value=float(room.get("width", 0)), step=100)
+                    new_height = st.number_input("Высота (мм)", value=float(room.get("height", 3000)), step=100)
+                    new_floor = st.number_input("Этаж", value=int(room.get("floor", 1)), step=1)
+                with col2:
+                    new_doors = st.number_input("Двери", value=int(room.get("doors", 0)), step=1)
+                    new_windows = st.number_input("Окна", value=int(room.get("windows", 0)), step=1)
+                    new_occupancy = st.number_input("Количество людей", value=int(room.get("occupancy", 0)), step=1)
+                    new_valuables = st.checkbox("Ценности", value=room.get("has_valuables", False))
+                    new_critical = st.checkbox("Критичное", value=room.get("is_critical", False))
+                with col3:
+                    new_fire_category = st.selectbox("Категория пожарной опасности", ["А","Б","В","Г","Д"], index=["А","Б","В","Г","Д"].index(room.get("fire_category", "В")))
+                    new_suspended = st.checkbox("Подвесной потолок", value=room.get("has_suspended", False))
+                    new_has_beams = st.checkbox("Балки > 400 мм", value=room.get("has_beams", False))
+                    if new_has_beams:
+                        new_beam_spacing = st.number_input("Шаг балок (мм)", value=float(room.get("beam_spacing", 1500)), step=100)
+                        new_beam_orientation = st.selectbox("Ориентация балок", ["вдоль", "поперёк", "не знаю"], index=["вдоль", "поперёк", "не знаю"].index(room.get("beam_orientation", "вдоль")))
+                    else:
+                        new_beam_spacing = 0
+                        new_beam_orientation = "нет"
+                    new_purpose = st.text_input("Назначение", value=room.get("purpose", ""))
+
+                if st.form_submit_button("💾 Сохранить изменения"):
+                    st.session_state.rooms[idx] = {
+                        "name": new_name,
+                        "length": new_length,
+                        "width": new_width,
+                        "height": new_height,
+                        "area": (new_length * new_width) / 1000000,
+                        "floor": new_floor,
+                        "doors": new_doors,
+                        "windows": new_windows,
+                        "occupancy": new_occupancy,
+                        "has_valuables": new_valuables,
+                        "is_critical": new_critical,
+                        "fire_category": new_fire_category,
+                        "has_suspended": new_suspended,
+                        "has_beams": new_has_beams,
+                        "beam_spacing": new_beam_spacing,
+                        "beam_orientation": new_beam_orientation,
+                        "purpose": new_purpose
+                    }
+                    st.session_state.edit_index = None
+                    st.rerun()
+                if st.form_submit_button("❌ Отмена"):
+                    st.session_state.edit_index = None
+                    st.rerun()
+
+    # Кнопка для вызова редактирования каждого помещения
+    for idx, room in enumerate(st.session_state.rooms):
+        col1, col2 = st.columns([10, 1])
+        with col1:
+            st.write(f"**{room['name']}** — {room['length']}×{room['width']}×{room['height']} мм, эт.{room['floor']}, {room['doors']} двери, {room['windows']} окон, {room['occupancy']} чел.")
+        with col2:
+            if st.button("✏️", key=f"edit_btn_{idx}"):
+                st.session_state.edit_index = idx
+                st.rerun()
+
 else:
     if not st.session_state.manual_mode:
         st.info("ℹ️ Загрузите чертёж или заполните данные вручную, нажав кнопку ниже.")
@@ -585,7 +675,7 @@ def calc_video(room):
     if room.get("has_valuables") or "касс" in room.get("purpose", "").lower():
         equip["Купол LTV-3CND40-M2714"] = 1
     if "операцион" in room.get("purpose", "").lower():
-        cnt = max(1, math.ceil(room["area"] / 20))
+        cnt = max(1, math.ceil((room["area"] * 1000000) / 20000000))  # 20 м² на камеру
         equip["Купол LTV-3CNB40-F28"] = cnt
     if "коридор" in room.get("purpose", "").lower():
         equip["Купол LTV-3CNB40-F28"] = 1
@@ -614,11 +704,11 @@ def calc_security(room):
     equip = {}
     doors = room.get("doors", 0)
     windows = room.get("windows", 0)
-    area = room.get("area", 0)
+    area_m2 = room.get("area", 0)
     if doors + windows > 0:
         equip["Извещатель «Стекло-3»"] = doors + windows
-    if area > 0:
-        cnt = max(1, math.ceil(area / 30))
+    if area_m2 > 0:
+        cnt = max(1, math.ceil(area_m2 / 30))
         equip["Извещатель «Фотон-9»"] = cnt
     if room.get("has_valuables") or "касс" in room.get("purpose", "").lower():
         equip["Извещатель С2000-СМК"] = 1
@@ -628,18 +718,37 @@ def calc_security(room):
 
 def calc_fire(room):
     equip = {}
-    area = room.get("area", 0)
-    height = room.get("height", 3.0)
+    area_m2 = room.get("area", 0)
+    height_mm = room.get("height", 3000)
     suspended = room.get("has_suspended", False)
-    beams = room.get("has_beams", False)
+    has_beams = room.get("has_beams", False)
+    beam_spacing_mm = room.get("beam_spacing", 0)
+    beam_orientation = room.get("beam_orientation", "нет")
+    
+    # Коэффициенты по СП 484.1311500.2020
     coeff = 1.0
     if suspended:
         coeff *= 1.2
-    if beams:
-        coeff *= 1.3
-    if height > 4.0:
+    if height_mm > 4000:
         coeff *= 1.1
-    cnt = max(1, math.ceil(area / 20 * coeff))
+    
+    # Учёт балок (СП 484, п. 6.6.36, 6.6.37)
+    if has_beams and beam_spacing_mm > 0:
+        if beam_spacing_mm <= 1500:
+            # Извещатели в каждой ячейке
+            length_m = room.get("length", 0) / 1000
+            width_m = room.get("width", 0) / 1000
+            beam_spacing_m = beam_spacing_mm / 1000
+            cells_x = max(1, math.ceil(length_m / beam_spacing_m))
+            cells_y = max(1, math.ceil(width_m / beam_spacing_m))
+            cell_count = cells_x * cells_y
+            cnt = max(1, math.ceil(cell_count * coeff))
+        else:
+            # шаг > 1500 мм
+            cnt = max(1, math.ceil(area_m2 / 20 * coeff))
+    else:
+        cnt = max(1, math.ceil(area_m2 / 20 * coeff))
+    
     equip["Дымовой ИП 212-141"] = cnt
     equip["ППКУП «Сириус»"] = 1
     equip["С2000-КДЛ"] = 1
@@ -647,10 +756,10 @@ def calc_fire(room):
 
 def calc_soue(room):
     equip = {}
-    area = room.get("area", 0)
+    area_m2 = room.get("area", 0)
     occupancy = room.get("occupancy", 0)
     floor = room.get("floor", 1)
-    cnt = max(1, math.ceil(area / 30))
+    cnt = max(1, math.ceil(area_m2 / 30))
     if occupancy > 10:
         equip["Оповещатель речевой «Рупор-Р»"] = cnt
     else:
@@ -698,7 +807,7 @@ def aggregate_equipment(rooms):
 def generate_svg(rooms, details):
     if not rooms:
         return "<svg><text>Нет помещений</text></svg>"
-    scale = 20
+    scale = 0.02  # 1 мм = 0.02 пикселя (подгонка под экран)
     margin = 30
     x_offset = margin
     y_offset = margin
@@ -718,25 +827,25 @@ def generate_svg(rooms, details):
     }
     
     svg_parts = []
-    svg_w = max(500, len(rooms) * 180 + margin * 2)
-    svg_h = 400 + len(rooms) * 20
+    total_width = max([room["length"] for room in rooms]) * scale + 2 * margin
+    total_height = sum([room["width"] for room in rooms]) * scale + 2 * margin + 100
+    svg_w = max(800, total_width)
+    svg_h = max(500, total_height)
     svg_parts.append(f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">')
     svg_parts.append('<rect width="100%" height="100%" fill="#f8f9fa"/>')
     svg_parts.append('<style>text { font-family: Inter, Arial, sans-serif; font-size: 11px; fill: #333; }</style>')
     
+    y_offset = margin
     for idx, (room, det) in enumerate(zip(rooms, details)):
         w = room["length"] * scale
         h = room["width"] * scale
         x = x_offset
-        y = y_offset + (idx % 2) * (h + 20)
-        if idx % 2 == 0:
-            x_offset += w + 30
-        else:
-            x_offset = margin
+        y = y_offset
+        y_offset += h + 10
         
         svg_parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="#ffffff" stroke="#2c3e50" stroke-width="2" rx="2"/>')
         svg_parts.append(f'<text x="{x+8}" y="{y+18}" font-weight="bold">{room["name"]}</text>')
-        svg_parts.append(f'<text x="{x+8}" y="{y+34}">{room["length"]:.1f}×{room["width"]:.1f} м</text>')
+        svg_parts.append(f'<text x="{x+8}" y="{y+34}">{room["length"]/1000:.1f}×{room["width"]/1000:.1f} м</text>')
         svg_parts.append(f'<text x="{x+8}" y="{y+50}">эт.{room["floor"]}</text>')
         
         if room.get("doors", 0) > 0:
@@ -770,7 +879,7 @@ def generate_svg(rooms, details):
                         icon_x += 100
     
     legend_x = margin
-    legend_y = svg_h - 60
+    legend_y = y_offset + 10
     svg_parts.append(f'<rect x="{legend_x}" y="{legend_y}" width="380" height="50" fill="#ffffff" stroke="#d0d7de" stroke-width="1" rx="4"/>')
     svg_parts.append(f'<text x="{legend_x+10}" y="{legend_y+18}" font-weight="bold" font-size="12">Условные обозначения:</text>')
     legend_items = [
@@ -794,8 +903,8 @@ def generate_svg(rooms, details):
 # 12. ГЕНЕРАЦИЯ ДОКУМЕНТОВ
 # ------------------------------------------------------------
 def generate_document(scenario, rooms, total_equip, room_details, svg_code):
-    rooms_desc = ", ".join([f"{r['name']} ({r['length']}×{r['width']} м, эт.{r['floor']})" for r in rooms])
-    total_area = sum(r["area"] for r in rooms)
+    rooms_desc = ", ".join([f"{r['name']} ({r['length']/1000:.1f}×{r['width']/1000:.1f} м, эт.{r['floor']})" for r in rooms])
+    total_area_m2 = sum(r["area"] for r in rooms)
     
     if scenario == "info":
         rooms_details_for_prompt = ""
@@ -803,7 +912,7 @@ def generate_document(scenario, rooms, total_equip, room_details, svg_code):
             rooms_details_for_prompt += f"""
 - Название: {room['name']}
   Назначение: {room['purpose']}
-  Размеры: {room['length']}×{room['width']} м, высота {room['height']} м
+  Размеры: {room['length']/1000:.1f}×{room['width']/1000:.1f} м, высота {room['height']/1000:.1f} м
   Этаж: {room['floor']}
   Двери: {room['doors']}, Окна: {room['windows']}
   Количество людей: {room['occupancy']}
@@ -811,6 +920,7 @@ def generate_document(scenario, rooms, total_equip, room_details, svg_code):
   Критичность: {'Да' if room['is_critical'] else 'Нет'}
   Подвесной потолок: {'Да' if room['has_suspended'] else 'Нет'}
   Балки > 400 мм: {'Да' if room['has_beams'] else 'Нет'}
+  Шаг балок: {room.get('beam_spacing', 0)} мм
   Категория пожарной опасности: {room['fire_category']}
 """
         
@@ -873,7 +983,7 @@ def generate_document(scenario, rooms, total_equip, room_details, svg_code):
 Сформируй рабочую документацию (РД) на системы безопасности для ВСП банка.
 
 Помещения: {rooms_desc}
-Общая площадь: {total_area} м²
+Общая площадь: {total_area_m2:.1f} м²
 Оборудование: {json.dumps(total_equip, ensure_ascii=False, indent=2)}
 
 Включи разделы:
@@ -953,7 +1063,7 @@ if st.session_state.calc_result:
 st.caption("""
 SecurLLM V3 — полная версия с ML-распознаванием чертежей.
 - Загрузите чертёж (PNG, JPG) для автоматического заполнения.
+- Все размеры в миллиметрах (мм), площадь — в м².
 - Все данные можно корректировать вручную.
 - Выберите сценарий: Справка, Смета, Рабочая документация, Заявка.
 """)
-
