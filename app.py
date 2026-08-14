@@ -2,7 +2,7 @@ import streamlit as st
 import re
 from gigachat import GigaChat
 
-st.set_page_config(page_title="SecurLLM — прототип", layout="centered")
+st.set_page_config(page_title="SecurLLM — Проектирование ВСП", layout="wide")
 
 # --- СТИЛИ (SberDesign) ---
 st.markdown("""
@@ -49,17 +49,13 @@ st.markdown("""
         <path d="M10 18L14 22L26 10" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
     <span style="font-size: 24px; font-weight: 700; color: #1A991A;">Сбер</span>
-    <span style="font-size: 18px; color: #333F48; font-weight: 300; margin-left: 4px;">| SecurLLM</span>
+    <span style="font-size: 18px; color: #333F48; font-weight: 300; margin-left: 4px;">| SecurLLM ВСП</span>
 </div>
 """, unsafe_allow_html=True)
 
 # --- ЗАГОЛОВОК ---
-st.markdown("""
-    <div style="text-align: left; margin-bottom: 1.5rem;">
-        <h1 style="color: #1a1a1a; font-size: 2rem; font-weight: 700; margin-bottom: 0.2rem;">SecurLLM</h1>
-        <p style="color: #4a4a4a; font-size: 1rem; margin-top: 0;">Система проектирования, оптимизации и управления безопасностью и противопожарной защитой объектов банка на всех этапах жизненного цикла.</p>
-    </div>
-""", unsafe_allow_html=True)
+st.title("🏦 Проектирование систем безопасности")
+st.markdown("*Введите параметры помещения и выберите зоны для каждой системы — получите полный проект.*")
 
 # --- ПРОВЕРКА СЕКРЕТА ---
 try:
@@ -109,7 +105,7 @@ with col2:
     )
 
 # --- ГЕОМЕТРИЯ ---
-st.markdown("**📐 Размеры помещения (для расчёта количества оборудования)**")
+st.markdown("**📐 Размеры помещения**")
 col_geom1, col_geom2, col_geom3, col_geom4, col_geom5 = st.columns(5)
 
 with col_geom1:
@@ -127,44 +123,8 @@ area = length * width
 perimeter = 2 * (length + width)
 st.caption(f"📏 Площадь: {area:.1f} м² · Периметр: {perimeter:.1f} м")
 
-# --- КРИТИЧЕСКИЕ ЗОНЫ ДЛЯ ВИДЕОНАБЛЮДЕНИЯ ---
-st.markdown("**🎥 Критические зоны для видеоконтроля**")
-st.caption("Выберите зоны, которые должны быть перекрыты камерами (для помещений, где требуется видеонаблюдение)")
-
-col_zone1, col_zone2, col_zone3 = st.columns(3)
-
-with col_zone1:
-    zone_entrance = st.checkbox("🚪 Входная группа (дверь)", value=True)
-    zone_cash = st.checkbox("💵 Кассовый узел (каждое рабочее место)", value=False)
-    zone_atm = st.checkbox("🏧 Банкоматы", value=False)
-
-with col_zone2:
-    zone_hall = st.checkbox("🛋️ Операционный зал (общий обзор)", value=False)
-    zone_storage = st.checkbox("🏛️ Хранилище / сейфовая (вход)", value=False)
-    zone_corridor = st.checkbox("🚶 Коридоры / проходы", value=False)
-
-with col_zone3:
-    zone_office = st.checkbox("🏢 Кабинеты / офисы", value=False)
-    zone_tech = st.checkbox("🛠️ Технические помещения", value=False)
-    zone_perimeter = st.checkbox("🔲 Периметр (окна, двери)", value=False)
-
-# Собираем выбранные зоны
-selected_zones = []
-if zone_entrance: selected_zones.append("Входная группа")
-if zone_cash: selected_zones.append("Кассовый узел")
-if zone_atm: selected_zones.append("Банкоматы")
-if zone_hall: selected_zones.append("Операционный зал")
-if zone_storage: selected_zones.append("Хранилище")
-if zone_corridor: selected_zones.append("Коридоры")
-if zone_office: selected_zones.append("Кабинеты")
-if zone_tech: selected_zones.append("Технические помещения")
-if zone_perimeter: selected_zones.append("Периметр")
-
-if not selected_zones:
-    selected_zones = ["Общий обзор (по умолчанию)"]
-
 # --- НЮАНСЫ ---
-st.markdown("**🔧 Особенности помещения**")
+st.markdown("**🔧 Конструктивные особенности**")
 col_nuance1, col_nuance2, col_nuance3 = st.columns(3)
 
 with col_nuance1:
@@ -172,6 +132,8 @@ with col_nuance1:
     beams = st.checkbox("Балки на потолке")
     if beams:
         beam_height = st.number_input("Высота балок (мм)", min_value=0, max_value=1000, value=400, step=50)
+    else:
+        beam_height = 0
 
 with col_nuance2:
     sun_side = st.checkbox("Окна на солнечную сторону")
@@ -182,8 +144,101 @@ with col_nuance3:
     gypsum_walls = st.checkbox("Гипсокартонные стены")
     through_walls = st.checkbox("Проход кабеля через стены")
 
-# --- ВЫБОР СЦЕНАРИЯ ---
-st.markdown("**Выберите сценарий:**")
+# --- ВИДЕОНАБЛЮДЕНИЕ (зоны) ---
+with st.expander("🎥 Видеонаблюдение — зоны контроля", expanded=False):
+    st.caption("Выберите зоны, которые должны быть перекрыты камерами")
+    col_zone1, col_zone2, col_zone3 = st.columns(3)
+    with col_zone1:
+        zone_entrance = st.checkbox("🚪 Входная группа", value=True)
+        zone_cash = st.checkbox("💵 Кассовый узел", value=False)
+        zone_atm = st.checkbox("🏧 Банкоматы", value=False)
+    with col_zone2:
+        zone_hall = st.checkbox("🛋️ Операционный зал", value=False)
+        zone_storage = st.checkbox("🏛️ Хранилище / сейфовая", value=False)
+        zone_corridor = st.checkbox("🚶 Коридоры", value=False)
+    with col_zone3:
+        zone_office = st.checkbox("🏢 Кабинеты", value=False)
+        zone_tech = st.checkbox("🛠️ Технические помещения", value=False)
+        zone_perimeter = st.checkbox("🔲 Периметр (окна/двери)", value=False)
+
+    selected_zones_video = []
+    if zone_entrance: selected_zones_video.append("Входная группа")
+    if zone_cash: selected_zones_video.append("Кассовый узел")
+    if zone_atm: selected_zones_video.append("Банкоматы")
+    if zone_hall: selected_zones_video.append("Операционный зал")
+    if zone_storage: selected_zones_video.append("Хранилище")
+    if zone_corridor: selected_zones_video.append("Коридоры")
+    if zone_office: selected_zones_video.append("Кабинеты")
+    if zone_tech: selected_zones_video.append("Технические помещения")
+    if zone_perimeter: selected_zones_video.append("Периметр")
+    if not selected_zones_video:
+        selected_zones_video = ["Общий обзор (по умолчанию)"]
+
+# --- СКУД ---
+with st.expander("🔐 СКУД — зоны доступа", expanded=False):
+    st.caption("Выберите зоны, где требуется контроль доступа, и тип идентификации")
+    col_skud1, col_skud2 = st.columns(2)
+    with col_skud1:
+        skud_entrance = st.checkbox("🚪 Главный вход", value=True)
+        skud_internal = st.checkbox("🚪 Внутренние двери (между зонами)", value=False)
+        skud_cash = st.checkbox("💵 Кассовый узел / хранилище", value=False)
+        skud_server = st.checkbox("🖥️ Серверная / ЦОД", value=False)
+        skud_office = st.checkbox("🏢 Кабинеты руководства", value=False)
+    with col_skud2:
+        skud_type = st.selectbox("Тип идентификации (по умолчанию)", ["Карта", "Карта + PIN", "Карта + биометрия"])
+        skud_2f_cash = st.checkbox("Двухфакторная для кассы/хранилища", value=True)
+        skud_2f_server = st.checkbox("Двухфакторная для серверной", value=True)
+
+    selected_zones_skud = []
+    if skud_entrance: selected_zones_skud.append("Главный вход")
+    if skud_internal: selected_zones_skud.append("Внутренние двери")
+    if skud_cash: selected_zones_skud.append("Кассовый узел / хранилище")
+    if skud_server: selected_zones_skud.append("Серверная / ЦОД")
+    if skud_office: selected_zones_skud.append("Кабинеты руководства")
+
+# --- ОХРАННАЯ СИГНАЛИЗАЦИЯ ---
+with st.expander("🚨 Охранная сигнализация — рубежи", expanded=False):
+    st.caption("Выберите рубежи охраны")
+    col_os1, col_os2 = st.columns(2)
+    with col_os1:
+        os_perimeter = st.checkbox("🛡️ Периметр (двери/окна)", value=True)
+        os_volume = st.checkbox("📡 Объём (движение)", value=True)
+        os_safe = st.checkbox("🔒 Предметный (сейфы/ценности)", value=False)
+    with col_os2:
+        os_cash = st.checkbox("💵 Кассовый узел — усиленная охрана", value=False)
+        os_storage = st.checkbox("🏛️ Хранилище — усиленная охрана", value=False)
+
+    selected_zones_os = []
+    if os_perimeter: selected_zones_os.append("Периметр (двери/окна)")
+    if os_volume: selected_zones_os.append("Объём (движение)")
+    if os_safe: selected_zones_os.append("Предметный (сейфы)")
+    if os_cash: selected_zones_os.append("Кассовый узел (усиленная)")
+    if os_storage: selected_zones_os.append("Хранилище (усиленная)")
+
+# --- ПОЖАРНАЯ СИГНАЛИЗАЦИЯ ---
+with st.expander("🔥 Пожарная сигнализация", expanded=False):
+    st.caption("Параметры расстановки пожарных извещателей")
+    col_fire1, col_fire2 = st.columns(2)
+    with col_fire1:
+        fire_detector_type = st.selectbox("Тип извещателей", ["Дымовые", "Тепловые", "Дымовые + тепловые"])
+        fire_ceiling = st.radio("Подвесной потолок", ["Нет", "Есть"], index=0)
+    with col_fire2:
+        fire_beam = st.radio("Балки > 400 мм", ["Нет", "Есть"], index=0)
+        fire_vent = st.number_input("Расстояние до вентиляции (м)", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
+
+# --- СОУЭ ---
+with st.expander("📢 СОУЭ — оповещение и эвакуация", expanded=False):
+    st.caption("Настройка системы оповещения")
+    col_sou1, col_sou2 = st.columns(2)
+    with col_sou1:
+        sou_type = st.selectbox("Тип оповещения", ["Звуковое", "Речевое"])
+        sou_floors = st.number_input("Количество этажей", min_value=1, max_value=10, value=1, step=1)
+    with col_sou2:
+        sou_evacuation_lights = st.checkbox("Световые оповещатели «Выход»", value=True)
+        sou_speech_clarity = st.checkbox("Разборчивость речи (90%)", value=True)
+
+# --- СЦЕНАРИЙ ---
+st.markdown("**📋 Выберите сценарий:**")
 scenario = st.radio(
     "",
     options=["Техническое задание", "Смета", "Проект", "Заявка"],
@@ -194,8 +249,8 @@ scenario = st.radio(
 
 legal_check = st.checkbox("✅ Проверить аттестат МЧС (заглушка)")
 
-# --- ФУНКЦИЯ ГЕНЕРАЦИИ СХЕМЫ (обновлена для зональной расстановки) ---
-def generate_blueprint(room_desc, equipment_list, length, width, doors, windows, selected_zones):
+# --- ФУНКЦИЯ SVG-ГЕНЕРАЦИИ (с учётом зон) ---
+def generate_blueprint(room_desc, equipment_list, length, width, doors, windows, selected_zones_video):
     scale = 40
     margin = 60
     svg_w = length * scale + 2 * margin
@@ -235,52 +290,32 @@ def generate_blueprint(room_desc, equipment_list, length, width, doors, windows,
         svg += f'<rect x="{wx}" y="{wy}" width="{win_w}" height="{win_h}" fill="#3498db" rx="2" />'
         svg += f'<text x="{wx + 5}" y="{wy + 25}" fill="#333" font-size="8">Окно</text>'
 
-    # --- РАССТАНОВКА КАМЕР ПО ЗОНАМ ---
+    # --- Камеры по зонам ---
     positions = {}
-
-    # Обрабатываем только камеры (элементы с "Видео" в названии), которые придут из equipment_list
-    camera_count = 0
-    for zone in selected_zones:
+    for zone in selected_zones_video:
         if zone == "Входная группа":
             positions["Видео (вход)"] = {"x": room_x + 10, "y": room_y + room_h - 50, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Кассовый узел":
-            # Предположим, что в кассовом узле 2 кассы (можно сделать параметризуемым)
             positions["Видео (касса 1)"] = {"x": room_x + room_w * 0.3, "y": room_y + 20, "sym": "V", "color": "#e74c3c"}
             positions["Видео (касса 2)"] = {"x": room_x + room_w * 0.7, "y": room_y + 20, "sym": "V", "color": "#e74c3c"}
-            camera_count += 2
         elif zone == "Операционный зал":
             positions["Видео (общий обзор)"] = {"x": room_x + room_w - 30, "y": room_y + 30, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Хранилище":
             positions["Видео (хранилище)"] = {"x": room_x + room_w // 2, "y": room_y + room_h // 2, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Коридоры":
-            # Камера в начале коридора
             positions["Видео (коридор)"] = {"x": room_x + 10, "y": room_y + 20, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Кабинеты":
             positions["Видео (кабинет)"] = {"x": room_x + room_w - 30, "y": room_y + room_h - 30, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Технические помещения":
             positions["Видео (техническое)"] = {"x": room_x + room_w // 2, "y": room_y + 20, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Периметр":
-            # по одной камере на окно/дверь (упрощённо)
             positions["Видео (периметр)"] = {"x": room_x + room_w - 30, "y": room_y + room_h - 30, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Банкоматы":
             positions["Видео (банкомат)"] = {"x": room_x + room_w * 0.5, "y": room_y + 20, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
         elif zone == "Общий обзор (по умолчанию)":
             positions["Видео (общий обзор)"] = {"x": room_x + room_w - 30, "y": room_y + 30, "sym": "V", "color": "#e74c3c"}
-            camera_count += 1
 
-    # Если камер нет, но в equipment_list есть "Видео", добавим одну для общего обзора
-    if camera_count == 0 and any("Видео" in eq for eq in equipment_list):
-        positions["Видео (общий обзор)"] = {"x": room_x + room_w - 30, "y": room_y + 30, "sym": "V", "color": "#e74c3c"}
-
-    # Остальное оборудование (не камеры) расставляем по старым правилам (условно)
+    # Остальное оборудование (условно)
     other_positions = {
         "СКУД": {"x": room_x + 20, "y": room_y + room_h - 50, "sym": "C", "color": "#2980b9"},
         "Движение": {"x": room_x + room_w // 2, "y": room_y + 20, "sym": "Д", "color": "#f39c12"},
@@ -290,15 +325,15 @@ def generate_blueprint(room_desc, equipment_list, length, width, doors, windows,
         "Контроллер": {"x": room_x + 20, "y": room_y + 60, "sym": "K", "color": "#6c5ce7"},
     }
 
-    # Рисуем все позиции
+    # Рисуем камеры
     for label, pos in positions.items():
         x, y, sym, color = pos["x"], pos["y"], pos["sym"], pos["color"]
         svg += f'<circle cx="{x}" cy="{y}" r="10" fill="{color}" />'
         svg += f'<text x="{x-4}" y="{y+3}" fill="#fff" font-size="8" font-weight="bold">{sym}</text>'
         svg += f'<text x="{x-15}" y="{y+20}" fill="#333" font-size="7">{label[:6]}</text>'
 
+    # Рисуем остальное оборудование
     for eq, pos in other_positions.items():
-        # Рисуем только если это оборудование есть в списке equipment_list
         if any(eq in e for e in equipment_list):
             x, y, sym, color = pos["x"], pos["y"], pos["sym"], pos["color"]
             if eq in ["СКУД", "Контроллер", "Ручной", "Газ"]:
@@ -335,7 +370,7 @@ def generate_blueprint(room_desc, equipment_list, length, width, doors, windows,
     return svg
 
 # --- КНОПКА ---
-if st.button("Получить результат", type="primary", use_container_width=True):
+if st.button("🚀 Сформировать проект", type="primary", use_container_width=True):
     if manual_input.strip():
         room_desc = manual_input.strip()
     elif selected_key:
@@ -346,10 +381,10 @@ if st.button("Получить результат", type="primary", use_containe
     if not room_desc.strip():
         st.warning("⚠️ Выберите типовое помещение или введите описание вручную.")
     else:
-        with st.spinner("🔄 Анализ..."):
+        with st.spinner("🔄 Генерация..."):
             try:
                 with GigaChat(credentials=GIGACHAT_KEY, model="GigaChat-3-Ultra", verify_ssl_certs=False) as client:
-                    # --- БАЗОВЫЙ ПРОМПТ С ЗОНАЛЬНЫМ ПОДХОДОМ ---
+                    # --- БАЗОВЫЙ ПРОМПТ (с учётом всех зон) ---
                     base_prompt = f"""
 Ты — эксперт по оснащению банков системами безопасности и противопожарной защиты.
 
@@ -365,17 +400,30 @@ if st.button("Получить результат", type="primary", use_containe
 Длина: {length} м, Ширина: {width} м, Высота: {height} м
 Площадь: {area:.1f} м², Периметр: {perimeter:.1f} м
 Двери: {doors} шт., Окна: {windows} шт.
-Критические зоны для видеоконтроля: {', '.join(selected_zones)}.
+
 Особенности: подвесной потолок - {'Да' if suspended_ceiling else 'Нет'}, балки - {'Да' if beams else 'Нет'}, солнечная сторона - {'Да' if sun_side else 'Нет'}.
 
+**Зоны и параметры по системам:**
+
+1. Видеонаблюдение: зоны контроля — {', '.join(selected_zones_video)}. Для каждой зоны требуется камера (для касс — по одной на рабочее место). Учти WDR, если выбрано.
+
+2. СКУД: зоны доступа — {', '.join(selected_zones_skud)}. Тип идентификации по умолчанию: {skud_type}. Для касс и хранилища — двухфакторная.
+
+3. Охранная сигнализация: рубежи — {', '.join(selected_zones_os)}.
+
+4. Пожарная сигнализация: тип извещателей — {fire_detector_type}, подвесной потолок — {fire_ceiling}, балки > 400 мм — {fire_beam}, расстояние до вентиляции — {fire_vent} м.
+
+5. СОУЭ: тип — {sou_type}, этажей — {sou_floors}.
+
 Правила расчёта:
-- Количество видеокамер определяется не площадью, а количеством критических зон. Для каждой зоны требуется минимум одна камера, для касс — по одной на рабочее место. В обосновании укажи, какая камера для какой зоны предназначена.
 - Дымовые извещатели: 1 на 30 м² (мин. 2). Расчёт: max(2, ceil({area}/30)).
 - Ручные извещатели: 1 на выход (если дверей > 0).
 - Датчики движения: 1 на 20 м² (мин. 1).
 - СКУД: 1 считыватель на дверь, 1 контроллер на помещение.
 - Длина кабеля: периметр × 1.5.
-При подвесном потолке — извещатели за потолком. При балках — в каждом отсеке. При солнечной стороне — камеры с WDR.
+- Для СОУЭ: количество оповещателей — исходя из площади и высоты помещения.
+
+При подвесном потолке — извещатели за потолком. При балках > 400 мм — в каждом отсеке. При солнечной стороне — камеры с WDR.
 При выборе оборудования строго придерживайся целевого перечня.
 В обосновании ссылайся на конкретные пункты нормативных документов.
 """
@@ -428,16 +476,16 @@ if st.button("Получить результат", type="primary", use_containe
                     st.success("✅ Готово")
                     st.markdown(raw)
 
-                    # --- ГЕНЕРАЦИЯ СХЕМЫ (с передачей выбранных зон) ---
+                    # --- ГЕНЕРАЦИЯ СХЕМЫ ---
                     if scenario in ["Проект", "Заявка"]:
                         equip_list = ["СКУД", "Видео", "Движение", "Дым", "Ручной", "Газ", "Контроллер"]
                         if "Оборудование:" in raw:
                             part = raw.split("Оборудование:")[-1].strip()
                             equip_list = [e.strip() for e in part.split(",") if e.strip()]
                         if equip_list:
-                            svg = generate_blueprint(room_desc, equip_list, length, width, doors, windows, selected_zones)
+                            svg = generate_blueprint(room_desc, equip_list, length, width, doors, windows, selected_zones_video)
                             st.markdown("### 📐 План расстановки оборудования")
-                            st.markdown("_*Размеры указаны согласно введённой геометрии. Камеры расставлены по выбранным зонам._")
+                            st.markdown("_*Камеры расставлены по выбранным зонам. Остальное оборудование — условно._")
                             st.markdown(svg, unsafe_allow_html=True)
                         else:
                             st.info("ℹ️ Список оборудования не найден в ответе, схема не сгенерирована.")
