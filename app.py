@@ -309,17 +309,17 @@ if uploaded_file is not None:
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("📥 Применить распознанные данные", use_container_width=True):
+                if st.button("📥 Применить распознанные данные", use_container_width=True, key="apply_recognized"):
                     st.session_state.rooms = recognized_rooms
                     st.session_state.manual_mode = False
                     st.rerun()
             with col2:
-                if st.button("✏️ Редактировать вручную", use_container_width=True):
+                if st.button("✏️ Редактировать вручную", use_container_width=True, key="edit_recognized"):
                     st.session_state.manual_mode = True
                     st.rerun()
         else:
             st.warning("⚠️ Не удалось распознать помещения. Заполните данные вручную.")
-            if st.button("✏️ Перейти к ручному вводу"):
+            if st.button("✏️ Перейти к ручному вводу", key="go_to_manual_after_fail"):
                 st.session_state.manual_mode = True
                 st.rerun()
 
@@ -393,12 +393,12 @@ if st.session_state.rooms:
 
     col_clear, col_fill = st.columns(2)
     with col_clear:
-        if st.button("🗑️ Очистить список"):
+        if st.button("🗑️ Очистить список", key="clear_rooms"):
             st.session_state.rooms = []
             st.session_state.manual_mode = False
             st.rerun()
     with col_fill:
-        if st.button("📥 Заполнить примером (ВСП)"):
+        if st.button("📥 Заполнить примером (ВСП)", key="fill_example"):
             st.session_state.rooms = [
                 {"name": "Кассовый зал", "length": 8, "width": 6, "height": 3.2, "area": 48, "floor": 1,
                  "doors": 2, "windows": 0, "occupancy": 10, "has_valuables": True, "is_critical": False,
@@ -418,7 +418,7 @@ if st.session_state.rooms:
 else:
     if not st.session_state.manual_mode:
         st.info("ℹ️ Загрузите чертёж или заполните данные вручную, нажав кнопку ниже.")
-        if st.button("✏️ Перейти к ручному вводу"):
+        if st.button("✏️ Перейти к ручному вводу", key="go_to_manual_from_empty"):
             st.session_state.manual_mode = True
             st.rerun()
 
@@ -431,13 +431,13 @@ if st.session_state.rooms:
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        btn_info = st.button("📋 Справка", use_container_width=True)
+        btn_info = st.button("📋 Справка", use_container_width=True, key="btn_info")
     with col2:
-        btn_estimate = st.button("💰 Смета", use_container_width=True)
+        btn_estimate = st.button("💰 Смета", use_container_width=True, key="btn_estimate")
     with col3:
-        btn_rd = st.button("📐 Рабочая документация", use_container_width=True)
+        btn_rd = st.button("📐 Рабочая документация", use_container_width=True, key="btn_rd")
     with col4:
-        btn_application = st.button("📨 Заявка", use_container_width=True)
+        btn_application = st.button("📨 Заявка", use_container_width=True, key="btn_application")
 
 # ------------------------------------------------------------
 # 9. ЛОГИКА ОПРЕДЕЛЕНИЯ СИСТЕМ (автоматически)
