@@ -101,17 +101,12 @@ except Exception:
     st.stop()
 
 # ------------------------------------------------------------
-# 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API (с фиксом SSL и URL)
+# 3. РЕАЛЬНЫЙ ВЫЗОВ GIGACHAT API (для текста)
 # ------------------------------------------------------------
-def call_gigachat_vision(prompt, image_base64, api_key):
-    """
-    Отправляет изображение в GigaChat через мультимодальный API.
-    Использует модель GigaChat-2-Max.
-    """
+def call_gigachat(prompt, api_key, model="GigaChat-2-Pro", max_tokens=3000, temperature=0.7):
     if not api_key:
         return "Ошибка: не указан API-ключ GigaChat."
 
-    # Авторизация
     auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     auth_headers = {
         "Authorization": f"Basic {api_key}",
@@ -128,32 +123,35 @@ def call_gigachat_vision(prompt, image_base64, api_key):
     except Exception as e:
         return f"Ошибка авторизации GigaChat: {str(e)}"
 
-    # Запрос к мультимодальной модели
-    vision_url = "https://api.giga.chat/v1/chat/completions"
-    vision_headers = {
+    chat_url = "https://api.giga.chat/v1/chat/completions"
+    chat_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-    
-    vision_payload = {
-        "model": "GigaChat-2-Max",  # изменено с GigaChat-Vision
+    chat_payload = {
+        "model": model,
         "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
-                ]
-            }
+            {"role": "system", "content": """Ты — эксперт по системам физической безопасности и противопожарной защиты для объектов ПАО Сбербанк.
+Приоритетная нормативная база (от высшего к низшему):
+1. Сборник стандартов по комплексной безопасности № 4461 (ПАО Сбербанк).
+2. ФЗ-123, ФЗ-384, ФЗ-69, ФЗ-152, ФЗ-187.
+3. Р 102-2024 (Росгвардия), СП 484.1311500.2020 (с Изм.1), СП 3.13130.2026, СП 76.
+4. ГОСТ Р 57580.1, 57580.2, 57580.4, Положения ЦБ РФ 851-П, 850-П, 382-П.
+5. ГОСТ Р 51558-2014, ГОСТ Р 51241-2008, ГОСТ 31565-2012, ГОСТ Р 70444-2022, ГОСТ 21.110, ГОСТ Р 21.1101.
+6. ПУЭ, СП 60, СП 134.
+7. Документация производителей (Болид, ТвинПро, ЦРТ, LTV).
+
+При генерации решений ссылайся на конкретные пункты документов.
+Отвечай строго по делу, используй профессиональную терминологию."""},
+            {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2,
-        "max_tokens": 2000,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "stream": False
     }
-    
     try:
-        response = requests.post(vision_url, headers=vision_headers, json=vision_payload, timeout=120, verify=False)
+        response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=90, verify=False)
         response.raise_for_status()
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
@@ -164,18 +162,15 @@ def call_gigachat_vision(prompt, image_base64, api_key):
         return "Ошибка: таймаут при обращении к GigaChat."
     except Exception as e:
         return f"Ошибка при генерации текста: {str(e)}"
-# ------------------------------------------------------------
-# 3.1. ПРОВЕРКА ДОСТУПНЫХ МОДЕЛЕЙ GIGACHAT
-# ------------------------------------------------------------
-def get_available_models(api_key):
-    """
-    Получает список доступных моделей GigaChat.
-    Возвращает JSON с моделями или текст ошибки.
-    """
-    if not api_key:
-        return "Ошибка: не указан API-ключ."
 
-    # 1. Получаем токен
+# ------------------------------------------------------------
+# 4. ML-МОДУЛЬ РАСПОЗНАВАНИЯ ЧЕРТЕЖЕЙ (через File API)
+# ------------------------------------------------------------
+def upload_file_to_gigachat(file_bytes, file_name, api_key):
+    """
+    Загружает файл в GigaChat и возвращает file_id.
+    """
+    # 1. Получаем токен доступа
     auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     auth_headers = {
         "Authorization": f"Basic {api_key}",
@@ -183,36 +178,25 @@ def get_available_models(api_key):
         "Content-Type": "application/x-www-form-urlencoded"
     }
     auth_data = {"scope": "GIGACHAT_API_PERS"}
-    try:
-        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
-        auth_response.raise_for_status()
-        access_token = auth_response.json().get("access_token")
-        if not access_token:
-            return "Ошибка получения токена"
-    except Exception as e:
-        return f"Ошибка авторизации: {str(e)}"
+    auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
+    auth_response.raise_for_status()
+    access_token = auth_response.json().get("access_token")
 
-    # 2. Запрос списка моделей
-    url = "https://api.giga.chat/v1/models"
+    # 2. Загружаем файл
+    upload_url = "https://api.giga.chat/v1/files"
     headers = {"Authorization": f"Bearer {access_token}"}
-    try:
-        response = requests.get(url, headers=headers, timeout=30, verify=False)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        return f"Ошибка получения моделей: {str(e)}"
+    files = {"file": (file_name, file_bytes, "image/png")}
 
-# ------------------------------------------------------------
-# 4. ML-МОДУЛЬ РАСПОЗНАВАНИЯ ЧЕРТЕЖЕЙ (GigaChat Vision)
-# ------------------------------------------------------------
-def call_gigachat_vision(prompt, image_base64, api_key):
-    """
-    Отправляет изображение в GigaChat Vision через мультимодальный API.
-    """
-    if not api_key:
-        return "Ошибка: не указан API-ключ GigaChat."
+    response = requests.post(upload_url, headers=headers, files=files, timeout=30, verify=False)
+    response.raise_for_status()
+    return response.json()["id"]
 
-    # Авторизация (та же, что и для обычного GigaChat)
+def call_gigachat_vision_with_file(prompt, file_id, api_key):
+    """
+    Отправляет запрос с прикреплённым файлом по file_id.
+    Использует GigaChat-2-Pro (поддерживает Vision).
+    """
+    # Получаем токен доступа
     auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     auth_headers = {
         "Authorization": f"Basic {api_key}",
@@ -220,60 +204,40 @@ def call_gigachat_vision(prompt, image_base64, api_key):
         "Content-Type": "application/x-www-form-urlencoded"
     }
     auth_data = {"scope": "GIGACHAT_API_PERS"}
-    try:
-        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
-        auth_response.raise_for_status()
-        access_token = auth_response.json().get("access_token")
-        if not access_token:
-            return "Ошибка получения токена"
-    except Exception as e:
-        return f"Ошибка авторизации GigaChat: {str(e)}"
+    auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
+    auth_response.raise_for_status()
+    access_token = auth_response.json().get("access_token")
 
-    # Запрос к Vision API
-    vision_url = "https://api.giga.chat/v1/chat/completions"
-    vision_headers = {
+    # Запрос к модели с прикреплённым файлом
+    chat_url = "https://api.giga.chat/v1/chat/completions"
+    headers = {
         "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        "Content-Type": "application/json"
     }
-    
-    vision_payload = {
-        "model": "GigaChat-Vision",  # мультимодальная модель
+
+    payload = {
+        "model": "GigaChat-2-Pro",
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
-                ]
+                "content": prompt,
+                "attachments": [file_id]
             }
         ],
         "temperature": 0.2,
-        "max_tokens": 2000,
-        "stream": False
+        "max_tokens": 2000
     }
-    
-    try:
-        response = requests.post(vision_url, headers=vision_headers, json=vision_payload, timeout=120, verify=False)
-        response.raise_for_status()
-        result = response.json()
-        if "choices" in result and len(result["choices"]) > 0:
-            return result["choices"][0]["message"]["content"]
-        else:
-            return f"Неожиданный формат ответа: {result}"
-    except requests.exceptions.Timeout:
-        return "Ошибка: таймаут при обращении к GigaChat Vision."
-    except Exception as e:
-        return f"Ошибка при генерации текста: {str(e)}"
+
+    response = requests.post(chat_url, headers=headers, json=payload, timeout=120, verify=False)
+    response.raise_for_status()
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
 
 def recognize_floor_plan(image_bytes, api_key):
     """
-    Отправляет изображение чертежа в GigaChat Vision.
+    Распознаёт план помещения: загружает изображение, отправляет запрос с file_id.
     Возвращает список помещений с параметрами.
     """
-    # Кодируем изображение в base64
-    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-    
     prompt = """
 Ты — эксперт по анализу архитектурных планов.
 Проанализируй план помещения на изображении.
@@ -295,12 +259,12 @@ def recognize_floor_plan(image_bytes, api_key):
 Если на чертеже нет помещений — верни пустой массив: []
 Не добавляй никаких пояснений, только JSON.
 """
-    
-    response_text = call_gigachat_vision(prompt, image_base64, api_key)
-    
-    # Парсим JSON из ответа
     try:
-        # Пробуем найти JSON в тексте (на случай, если модель добавила пояснения)
+        # 1. Загружаем файл
+        file_id = upload_file_to_gigachat(image_bytes, "floor_plan.png", api_key)
+        # 2. Отправляем запрос с file_id
+        response_text = call_gigachat_vision_with_file(prompt, file_id, api_key)
+        # 3. Парсим JSON
         import re
         json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
         if json_match:
@@ -308,9 +272,8 @@ def recognize_floor_plan(image_bytes, api_key):
         else:
             rooms = json.loads(response_text)
         return rooms
-    except json.JSONDecodeError as e:
-        st.error(f"Ошибка парсинга JSON: {e}")
-        st.text_area("Сырой ответ модели:", response_text, height=200)
+    except Exception as e:
+        st.error(f"Ошибка распознавания чертежа: {str(e)}")
         return []
 
 # ------------------------------------------------------------
@@ -329,47 +292,39 @@ if "manual_mode" not in st.session_state:
 st.subheader("📄 Загрузка чертежа")
 
 uploaded_file = st.file_uploader(
-    "Загрузите чертёж (PDF, PNG, JPG) — данные будут извлечены автоматически",
-    type=["pdf", "png", "jpg", "jpeg"],
-    help="Для прототипа поддерживаются растровые изображения (PNG, JPG). PDF обрабатывается как изображение."
+    "Загрузите чертёж (PNG, JPG) — данные будут извлечены автоматически",
+    type=["png", "jpg", "jpeg"],
+    help="Поддерживаются растровые изображения. PDF пока не поддерживается."
 )
 
 if uploaded_file is not None:
     with st.spinner("🔄 Распознавание чертежа с помощью GigaChat Vision..."):
-        # Читаем файл в байты (для PDF нужно конвертировать в изображение, но пока упрощённо)
         file_bytes = uploaded_file.read()
+        recognized_rooms = recognize_floor_plan(file_bytes, GIGACHAT_KEY)
         
-        # Определяем тип файла
-        if uploaded_file.type == "application/pdf":
-            st.warning("⚠️ Для PDF требуется дополнительная обработка (конвертация в изображение). В текущей версии рекомендуется использовать PNG или JPG.")
-            # Для прототипа: если PDF, показываем сообщение
-        else:
-            # Вызываем ML-модуль
-            recognized_rooms = recognize_floor_plan(file_bytes, GIGACHAT_KEY)
+        if recognized_rooms and len(recognized_rooms) > 0:
+            st.success(f"✅ Распознано {len(recognized_rooms)} помещений")
+            df_recognized = pd.DataFrame(recognized_rooms)
+            st.dataframe(df_recognized, use_container_width=True)
             
-            if recognized_rooms and len(recognized_rooms) > 0:
-                st.success(f"✅ Распознано {len(recognized_rooms)} помещений")
-                df_recognized = pd.DataFrame(recognized_rooms)
-                st.dataframe(df_recognized, use_container_width=True)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📥 Применить распознанные данные", use_container_width=True):
-                        st.session_state.rooms = recognized_rooms
-                        st.session_state.manual_mode = False
-                        st.rerun()
-                with col2:
-                    if st.button("✏️ Редактировать вручную", use_container_width=True):
-                        st.session_state.manual_mode = True
-                        st.rerun()
-            else:
-                st.warning("⚠️ Не удалось распознать помещения на чертеже. Заполните данные вручную.")
-                if st.button("✏️ Перейти к ручному вводу"):
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📥 Применить распознанные данные", use_container_width=True):
+                    st.session_state.rooms = recognized_rooms
+                    st.session_state.manual_mode = False
+                    st.rerun()
+            with col2:
+                if st.button("✏️ Редактировать вручную", use_container_width=True):
                     st.session_state.manual_mode = True
                     st.rerun()
+        else:
+            st.warning("⚠️ Не удалось распознать помещения. Заполните данные вручную.")
+            if st.button("✏️ Перейти к ручному вводу"):
+                st.session_state.manual_mode = True
+                st.rerun()
 
 # ------------------------------------------------------------
-# 7. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ (ручной ввод + автозаполнение)
+# 7. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ (ручной ввод)
 # ------------------------------------------------------------
 if st.session_state.manual_mode or not st.session_state.rooms:
     st.subheader("📐 Экспликация помещений (ручной ввод)")
@@ -400,7 +355,7 @@ if st.session_state.manual_mode or not st.session_state.rooms:
                 has_beams = st.checkbox("Балки > 400 мм")
                 purpose_type = st.selectbox(
                     "Назначение помещения",
-                    ["Кассовый узел", "Операционный зал", "Серверная", "Хранилище", 
+                    ["Кассовый узел", "Операционный зал", "Серверная", "Хранилище",
                      "Кабинет", "Коридор", "Офис", "Санузел", "Другое"]
                 )
                 if purpose_type == "Другое":
@@ -563,7 +518,7 @@ def calc_video(room):
         equip["Купол LTV-3CNB40-F28"] = 1
     if room.get("is_critical") or "сервер" in room.get("purpose", "").lower():
         equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
-        equip["Цилиндрическая LTV-3CNB40-F28"] = 2  # угловые камеры
+        equip["Цилиндрическая LTV-3CNB40-F28"] = 2
     return equip
 
 def calc_skud(room):
@@ -923,19 +878,8 @@ if st.session_state.calc_result:
 # 15. ПРИМЕЧАНИЕ
 # ------------------------------------------------------------
 st.caption("""
-SecurLLM V3 — ML-распознавание чертежей через GigaChat Vision.
+SecurLLM V3 — полная версия с ML-распознаванием чертежей.
 - Загрузите чертёж (PNG, JPG) для автоматического заполнения.
-- Данные можно корректировать вручную.
+- Все данные можно корректировать вручную.
 - Выберите сценарий: Справка, Смета, Рабочая документация, Заявка.
 """)
-
-# --- ПРОВЕРКА ДОСТУПНЫХ МОДЕЛЕЙ (для отладки) ---
-with st.expander("🔧 Диагностика: доступные модели GigaChat"):
-    if st.button("Получить список моделей"):
-        with st.spinner("Загрузка..."):
-            models_data = get_available_models(GIGACHAT_KEY)
-            if isinstance(models_data, dict) and "data" in models_data:
-                st.success(f"✅ Доступно {len(models_data['data'])} моделей")
-                st.json(models_data)
-            else:
-                st.error(f"Ошибка: {models_data}")
