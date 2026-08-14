@@ -667,18 +667,21 @@ else:
             st.rerun()
 
 # ------------------------------------------------------------
-# 12. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
+# 12. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ (как в V2 — через markdown)
 # ------------------------------------------------------------
 if st.session_state.calc_result:
     res = st.session_state.calc_result
     st.markdown("---")
     st.subheader(f"📄 Результат: {res['scenario']}")
     
-    st.text_area("Содержание", res["document"], height=400)
+    # --- Вывод документа через markdown (сохраняет форматирование) ---
+    st.markdown(res["document"])
     
+    # --- SVG (если есть) ---
     if res.get("svg"):
+        st.markdown("---")
         st.subheader("🖼️ Схема расстановки оборудования")
-        st.components.v1.html(res["svg"], height=600)
+        st.components.v1.html(res["svg"], height=500)
         b64 = base64.b64encode(res["svg"].encode()).decode()
         st.markdown(f'<a href="data:image/svg+xml;base64,{b64}" download="scheme.svg">📥 Скачать SVG</a>', unsafe_allow_html=True)
 
