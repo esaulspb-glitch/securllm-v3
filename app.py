@@ -164,6 +164,44 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
         return f"Ошибка при генерации текста: {str(e)}"
 
 # ------------------------------------------------------------
+# 3.1. ПРОВЕРКА ДОСТУПНЫХ МОДЕЛЕЙ GIGACHAT
+# ------------------------------------------------------------
+def get_available_models(api_key):
+    """
+    Получает список доступных моделей GigaChat.
+    Возвращает JSON с моделями или текст ошибки.
+    """
+    if not api_key:
+        return "Ошибка: не указан API-ключ."
+
+    # 1. Получаем токен
+    auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    auth_headers = {
+        "Authorization": f"Basic {api_key}",
+        "RqUID": str(uuid.uuid4()),
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    auth_data = {"scope": "GIGACHAT_API_PERS"}
+    try:
+        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
+        auth_response.raise_for_status()
+        access_token = auth_response.json().get("access_token")
+        if not access_token:
+            return "Ошибка получения токена"
+    except Exception as e:
+        return f"Ошибка авторизации: {str(e)}"
+
+    # 2. Запрос списка моделей
+    url = "https://api.giga.chat/v1/models"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    try:
+        response = requests.get(url, headers=headers, timeout=30, verify=False)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        return f"Ошибка получения моделей: {str(e)}"
+
+# ------------------------------------------------------------
 # 4. ML-МОДУЛЬ РАСПОЗНАВАНИЯ ЧЕРТЕЖЕЙ (GigaChat Vision)
 # ------------------------------------------------------------
 def call_gigachat_vision(prompt, image_base64, api_key):
@@ -889,3 +927,14 @@ SecurLLM V3 — ML-распознавание чертежей через GigaCh
 - Данные можно корректировать вручную.
 - Выберите сценарий: Справка, Смета, Рабочая документация, Заявка.
 """)
+
+# --- ПРОВЕРКА ДОСТУПНЫХ МОДЕЛЕЙ (для отладки) ---
+with st.expander("🔧 Диагностика: доступные модели GigaChat"):
+    if st.button("Получить список моделей"):
+        with st.spinner("Загрузка..."):
+            models_data = get_available_models(GIGACHAT_KEY)
+            if isinstance(models_data, dict) and "data" in models_data:
+                st.success(f"✅ Доступно {len(models_data['data'])} моделей")
+                st.json(models_data)
+            else:
+                st.error(f"Ошибка: {models_data}")
