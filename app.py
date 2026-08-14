@@ -123,7 +123,7 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
     except Exception as e:
         return f"Ошибка авторизации GigaChat: {str(e)}"
 
-    chat_url = "https://api.giga.chat/v1/chat/completions"  # новый URL
+    chat_url = "https://api.giga.chat/v1/chat/completions"
     chat_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -164,121 +164,294 @@ def call_gigachat(prompt, api_key, model="GigaChat-3-Ultra", max_tokens=3000, te
         return f"Ошибка при генерации текста: {str(e)}"
 
 # ------------------------------------------------------------
-# 4. СОСТОЯНИЕ СЕССИИ
+# 4. ML-МОДУЛЬ РАСПОЗНАВАНИЯ ЧЕРТЕЖЕЙ (GigaChat Vision)
+# ------------------------------------------------------------
+def call_gigachat_vision(prompt, image_base64, api_key):
+    """
+    Отправляет изображение в GigaChat Vision через мультимодальный API.
+    """
+    if not api_key:
+        return "Ошибка: не указан API-ключ GigaChat."
+
+    # Авторизация (та же, что и для обычного GigaChat)
+    auth_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    auth_headers = {
+        "Authorization": f"Basic {api_key}",
+        "RqUID": str(uuid.uuid4()),
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    auth_data = {"scope": "GIGACHAT_API_PERS"}
+    try:
+        auth_response = requests.post(auth_url, headers=auth_headers, data=auth_data, timeout=10, verify=False)
+        auth_response.raise_for_status()
+        access_token = auth_response.json().get("access_token")
+        if not access_token:
+            return "Ошибка получения токена"
+    except Exception as e:
+        return f"Ошибка авторизации GigaChat: {str(e)}"
+
+    # Запрос к Vision API
+    vision_url = "https://api.giga.chat/v1/chat/completions"
+    vision_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    vision_payload = {
+        "model": "GigaChat-Vision",  # мультимодальная модель
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
+                ]
+            }
+        ],
+        "temperature": 0.2,
+        "max_tokens": 2000,
+        "stream": False
+    }
+    
+    try:
+        response = requests.post(vision_url, headers=vision_headers, json=vision_payload, timeout=120, verify=False)
+        response.raise_for_status()
+        result = response.json()
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"]
+        else:
+            return f"Неожиданный формат ответа: {result}"
+    except requests.exceptions.Timeout:
+        return "Ошибка: таймаут при обращении к GigaChat Vision."
+    except Exception as e:
+        return f"Ошибка при генерации текста: {str(e)}"
+
+def recognize_floor_plan(image_bytes, api_key):
+    """
+    Отправляет изображение чертежа в GigaChat Vision.
+    Возвращает список помещений с параметрами.
+    """
+    # Кодируем изображение в base64
+    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    
+    prompt = """
+Ты — эксперт по анализу архитектурных планов.
+Проанализируй план помещения на изображении.
+Извлеки все помещения, их размеры (длина, ширина), количество дверей и окон,
+назначение (если подписано).
+
+Верни результат строго в формате JSON (массив объектов):
+[
+    {
+        "name": "название помещения",
+        "length": длина в метрах (число),
+        "width": ширина в метрах (число),
+        "doors": количество дверей (число),
+        "windows": количество окон (число),
+        "purpose": "назначение"
+    }
+]
+Если какие-то данные отсутствуют — укажи null.
+Если на чертеже нет помещений — верни пустой массив: []
+Не добавляй никаких пояснений, только JSON.
+"""
+    
+    response_text = call_gigachat_vision(prompt, image_base64, api_key)
+    
+    # Парсим JSON из ответа
+    try:
+        # Пробуем найти JSON в тексте (на случай, если модель добавила пояснения)
+        import re
+        json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
+        if json_match:
+            rooms = json.loads(json_match.group())
+        else:
+            rooms = json.loads(response_text)
+        return rooms
+    except json.JSONDecodeError as e:
+        st.error(f"Ошибка парсинга JSON: {e}")
+        st.text_area("Сырой ответ модели:", response_text, height=200)
+        return []
+
+# ------------------------------------------------------------
+# 5. СОСТОЯНИЕ СЕССИИ
 # ------------------------------------------------------------
 if "rooms" not in st.session_state:
     st.session_state.rooms = []
 if "calc_result" not in st.session_state:
     st.session_state.calc_result = None
+if "manual_mode" not in st.session_state:
+    st.session_state.manual_mode = False
 
 # ------------------------------------------------------------
-# 5. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ (расширенная, V3)
+# 6. ЗАГРУЗКА ЧЕРТЕЖА (реальный ML-модуль)
 # ------------------------------------------------------------
-st.subheader("📐 Экспликация помещений")
+st.subheader("📄 Загрузка чертежа")
 
-with st.expander("➕ Добавить помещение", expanded=False):
-    with st.form("add_room_form"):
-        st.markdown("**Основные параметры**")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            room_name = st.text_input("Название", placeholder="касса №1")
-            length = st.number_input("Длина (м)", min_value=0.5, value=6.0, step=0.5)
-            width = st.number_input("Ширина (м)", min_value=0.5, value=4.0, step=0.5)
-            height = st.number_input("Высота потолка (м)", min_value=2.0, value=3.0, step=0.1)
-            floor = st.number_input("Этаж", min_value=1, value=1, step=1)
-        with col2:
-            doors = st.number_input("Двери", min_value=0, value=1, step=1)
-            windows = st.number_input("Окна", min_value=0, value=0, step=1)
-            occupancy = st.number_input("Количество людей", min_value=0, value=5, step=1)
-            has_valuables = st.checkbox("Наличие ценностей (сейфы, касса)")
-            is_critical = st.checkbox("Критичное помещение (серверная, хранилище)")
-        with col3:
-            fire_category = st.selectbox(
-                "Категория пожарной опасности",
-                ["А", "Б", "В", "Г", "Д"],
-                index=2
-            )
-            has_suspended = st.checkbox("Подвесной потолок")
-            has_beams = st.checkbox("Балки > 400 мм")
-            purpose = st.text_input("Назначение (для классификации)", placeholder="кассовый узел")
+uploaded_file = st.file_uploader(
+    "Загрузите чертёж (PDF, PNG, JPG) — данные будут извлечены автоматически",
+    type=["pdf", "png", "jpg", "jpeg"],
+    help="Для прототипа поддерживаются растровые изображения (PNG, JPG). PDF обрабатывается как изображение."
+)
 
-        submitted = st.form_submit_button("✅ Добавить помещение")
-        if submitted and room_name.strip():
-            st.session_state.rooms.append({
-                "name": room_name.strip(),
-                "length": length,
-                "width": width,
-                "height": height,
-                "area": length * width,
-                "floor": floor,
-                "doors": doors,
-                "windows": windows,
-                "occupancy": occupancy,
-                "has_valuables": has_valuables,
-                "is_critical": is_critical,
-                "fire_category": fire_category,
-                "has_suspended": has_suspended,
-                "has_beams": has_beams,
-                "purpose": purpose.strip() or "помещение"
-            })
-            st.success(f"✅ Добавлено: {room_name}")
-            st.rerun()
+if uploaded_file is not None:
+    with st.spinner("🔄 Распознавание чертежа с помощью GigaChat Vision..."):
+        # Читаем файл в байты (для PDF нужно конвертировать в изображение, но пока упрощённо)
+        file_bytes = uploaded_file.read()
+        
+        # Определяем тип файла
+        if uploaded_file.type == "application/pdf":
+            st.warning("⚠️ Для PDF требуется дополнительная обработка (конвертация в изображение). В текущей версии рекомендуется использовать PNG или JPG.")
+            # Для прототипа: если PDF, показываем сообщение
+        else:
+            # Вызываем ML-модуль
+            recognized_rooms = recognize_floor_plan(file_bytes, GIGACHAT_KEY)
+            
+            if recognized_rooms and len(recognized_rooms) > 0:
+                st.success(f"✅ Распознано {len(recognized_rooms)} помещений")
+                df_recognized = pd.DataFrame(recognized_rooms)
+                st.dataframe(df_recognized, use_container_width=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📥 Применить распознанные данные", use_container_width=True):
+                        st.session_state.rooms = recognized_rooms
+                        st.session_state.manual_mode = False
+                        st.rerun()
+                with col2:
+                    if st.button("✏️ Редактировать вручную", use_container_width=True):
+                        st.session_state.manual_mode = True
+                        st.rerun()
+            else:
+                st.warning("⚠️ Не удалось распознать помещения на чертеже. Заполните данные вручную.")
+                if st.button("✏️ Перейти к ручному вводу"):
+                    st.session_state.manual_mode = True
+                    st.rerun()
 
+# ------------------------------------------------------------
+# 7. ЭКСПЛИКАЦИЯ ПОМЕЩЕНИЙ (ручной ввод + автозаполнение)
+# ------------------------------------------------------------
+if st.session_state.manual_mode or not st.session_state.rooms:
+    st.subheader("📐 Экспликация помещений (ручной ввод)")
+
+    with st.expander("➕ Добавить помещение", expanded=False):
+        with st.form("add_room_form"):
+            st.markdown("**Основные параметры**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                room_name = st.text_input("Название", placeholder="касса №1")
+                length = st.number_input("Длина (м)", min_value=0.5, value=6.0, step=0.5)
+                width = st.number_input("Ширина (м)", min_value=0.5, value=4.0, step=0.5)
+                height = st.number_input("Высота потолка (м)", min_value=2.0, value=3.0, step=0.1)
+                floor = st.number_input("Этаж", min_value=1, value=1, step=1)
+            with col2:
+                doors = st.number_input("Двери", min_value=0, value=1, step=1)
+                windows = st.number_input("Окна", min_value=0, value=0, step=1)
+                occupancy = st.number_input("Количество людей", min_value=0, value=5, step=1)
+                has_valuables = st.checkbox("Наличие ценностей (сейфы, касса)")
+                is_critical = st.checkbox("Критичное помещение (серверная, хранилище)")
+            with col3:
+                fire_category = st.selectbox(
+                    "Категория пожарной опасности",
+                    ["А", "Б", "В", "Г", "Д"],
+                    index=2
+                )
+                has_suspended = st.checkbox("Подвесной потолок")
+                has_beams = st.checkbox("Балки > 400 мм")
+                purpose_type = st.selectbox(
+                    "Назначение помещения",
+                    ["Кассовый узел", "Операционный зал", "Серверная", "Хранилище", 
+                     "Кабинет", "Коридор", "Офис", "Санузел", "Другое"]
+                )
+                if purpose_type == "Другое":
+                    purpose = st.text_input("Укажите назначение", placeholder="например: архив")
+                else:
+                    purpose = purpose_type
+
+            submitted = st.form_submit_button("✅ Добавить помещение")
+            if submitted and room_name.strip():
+                st.session_state.rooms.append({
+                    "name": room_name.strip(),
+                    "length": length,
+                    "width": width,
+                    "height": height,
+                    "area": length * width,
+                    "floor": floor,
+                    "doors": doors,
+                    "windows": windows,
+                    "occupancy": occupancy,
+                    "has_valuables": has_valuables,
+                    "is_critical": is_critical,
+                    "fire_category": fire_category,
+                    "has_suspended": has_suspended,
+                    "has_beams": has_beams,
+                    "purpose": purpose
+                })
+                st.success(f"✅ Добавлено: {room_name}")
+                st.rerun()
+
+# Отображение списка комнат
 if st.session_state.rooms:
     df_rooms = pd.DataFrame(st.session_state.rooms)
-    display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy"]
+    display_cols = ["name", "length", "width", "height", "area", "floor", "doors", "windows", "occupancy", "purpose"]
     st.dataframe(df_rooms[display_cols], use_container_width=True, hide_index=True)
 
     col_clear, col_fill = st.columns(2)
     with col_clear:
         if st.button("🗑️ Очистить список"):
             st.session_state.rooms = []
+            st.session_state.manual_mode = False
             st.rerun()
     with col_fill:
         if st.button("📥 Заполнить примером (ВСП)"):
             st.session_state.rooms = [
                 {"name": "Кассовый зал", "length": 8, "width": 6, "height": 3.2, "area": 48, "floor": 1,
                  "doors": 2, "windows": 0, "occupancy": 10, "has_valuables": True, "is_critical": False,
-                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "кассовый узел"},
+                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "Кассовый узел"},
                 {"name": "Операционный зал", "length": 12, "width": 8, "height": 3.2, "area": 96, "floor": 1,
                  "doors": 1, "windows": 2, "occupancy": 25, "has_valuables": False, "is_critical": False,
-                 "fire_category": "В", "has_suspended": True, "has_beams": False, "purpose": "операционный зал"},
+                 "fire_category": "В", "has_suspended": True, "has_beams": False, "purpose": "Операционный зал"},
                 {"name": "Хранилище", "length": 4, "width": 4, "height": 3.0, "area": 16, "floor": 1,
                  "doors": 1, "windows": 0, "occupancy": 0, "has_valuables": True, "is_critical": True,
-                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "хранилище"},
+                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "Хранилище"},
                 {"name": "Серверная", "length": 3, "width": 3, "height": 3.0, "area": 9, "floor": 1,
                  "doors": 1, "windows": 0, "occupancy": 2, "has_valuables": False, "is_critical": True,
-                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "серверная"},
+                 "fire_category": "В", "has_suspended": False, "has_beams": False, "purpose": "Серверная"},
             ]
+            st.session_state.manual_mode = False
             st.rerun()
 else:
-    st.info("Пока нет ни одного помещения. Добавьте комнаты для расчёта.")
+    if not st.session_state.manual_mode:
+        st.info("ℹ️ Загрузите чертёж или заполните данные вручную, нажав кнопку ниже.")
+        if st.button("✏️ Перейти к ручному вводу"):
+            st.session_state.manual_mode = True
+            st.rerun()
 
 # ------------------------------------------------------------
-# 6. ВЫБОР СЦЕНАРИЯ (4 кнопки, как в V2)
+# 8. ВЫБОР СЦЕНАРИЯ (4 кнопки)
 # ------------------------------------------------------------
-st.markdown("---")
-st.subheader("📄 Выберите сценарий генерации")
+if st.session_state.rooms:
+    st.markdown("---")
+    st.subheader("📄 Выберите сценарий генерации")
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    btn_info = st.button("📋 Справка", use_container_width=True)
-with col2:
-    btn_estimate = st.button("💰 Смета", use_container_width=True)
-with col3:
-    btn_rd = st.button("📐 Рабочая документация", use_container_width=True)
-with col4:
-    btn_application = st.button("📨 Заявка", use_container_width=True)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        btn_info = st.button("📋 Справка", use_container_width=True)
+    with col2:
+        btn_estimate = st.button("💰 Смета", use_container_width=True)
+    with col3:
+        btn_rd = st.button("📐 Рабочая документация", use_container_width=True)
+    with col4:
+        btn_application = st.button("📨 Заявка", use_container_width=True)
 
 # ------------------------------------------------------------
-# 7. ЛОГИКА ОПРЕДЕЛЕНИЯ СИСТЕМ (V2, автоматически)
+# 9. ЛОГИКА ОПРЕДЕЛЕНИЯ СИСТЕМ (автоматически)
 # ------------------------------------------------------------
 def get_systems_for_room(room):
     purpose = room.get("purpose", "").lower()
     is_critical = room.get("is_critical", False)
     has_valuables = room.get("has_valuables", False)
-    has_windows = room.get("windows", 0) > 0
-    has_doors = room.get("doors", 0) > 0
     occupancy = room.get("occupancy", 0)
     
     systems = {
@@ -289,7 +462,6 @@ def get_systems_for_room(room):
         "soue": False
     }
     
-    # --- Определяем по назначению ---
     if "касс" in purpose or "касса" in purpose:
         systems["video"] = True
         systems["skud"] = True
@@ -324,18 +496,11 @@ def get_systems_for_room(room):
         systems["fire"] = True
         if occupancy > 10:
             systems["soue"] = True
-    elif "сервер" in purpose:
-        systems["video"] = True
-        systems["skud"] = True
-        systems["security"] = True
-        systems["fire"] = True
-        systems["soue"] = True
-    else:  # общий случай — офисное помещение
+    else:
         systems["video"] = True
         systems["fire"] = True
         systems["soue"] = True if occupancy > 5 else False
     
-    # --- Корректировки по дополнительным признакам ---
     if has_valuables and not systems["security"]:
         systems["security"] = True
         systems["skud"] = True
@@ -346,19 +511,20 @@ def get_systems_for_room(room):
     return systems
 
 # ------------------------------------------------------------
-# 8. ФУНКЦИИ РАСЧЁТА ОБОРУДОВАНИЯ
+# 10. ФУНКЦИИ РАСЧЁТА ОБОРУДОВАНИЯ (оптимальные)
 # ------------------------------------------------------------
 def calc_video(room):
     equip = {}
     if room.get("has_valuables") or "касс" in room.get("purpose", "").lower():
         equip["Купол LTV-3CND40-M2714"] = 1
-    if room.get("windows", 0) > 0:
-        equip["Уличная LTV-3RN6481-R"] = room.get("windows", 0)
     if "операцион" in room.get("purpose", "").lower():
         cnt = max(1, math.ceil(room["area"] / 20))
         equip["Купол LTV-3CNB40-F28"] = cnt
     if "коридор" in room.get("purpose", "").lower():
         equip["Купол LTV-3CNB40-F28"] = 1
+    if room.get("is_critical") or "сервер" in room.get("purpose", "").lower():
+        equip["Купол LTV-3CND40-M2714"] = equip.get("Купол LTV-3CND40-M2714", 0) + 1
+        equip["Цилиндрическая LTV-3CNB40-F28"] = 2  # угловые камеры
     return equip
 
 def calc_skud(room):
@@ -389,7 +555,6 @@ def calc_security(room):
         equip["Извещатель «Фотон-9»"] = cnt
     if room.get("has_valuables") or "касс" in room.get("purpose", "").lower():
         equip["Извещатель С2000-СМК"] = 1
-        # Усиленная охрана
         equip["Извещатель «Фотон-9»"] = equip.get("Извещатель «Фотон-9»", 0) + 2
         equip["Извещатель «Стекло-3»"] = equip.get("Извещатель «Стекло-3»", 0) + 2
     return equip
@@ -427,7 +592,7 @@ def calc_soue(room):
     return equip
 
 # ------------------------------------------------------------
-# 9. АГРЕГАЦИЯ И SVG
+# 11. АГРЕГАЦИЯ И SVG
 # ------------------------------------------------------------
 def aggregate_equipment(rooms):
     total_equip = {"video": {}, "skud": {}, "security": {}, "fire": {}, "soue": {}}
@@ -507,21 +672,20 @@ def generate_svg(rooms, details):
         svg_parts.append(f'<text x="{x+8}" y="{y+34}">{room["length"]:.1f}×{room["width"]:.1f} м</text>')
         svg_parts.append(f'<text x="{x+8}" y="{y+50}">эт.{room["floor"]}</text>')
         
-        # Двери
-        for d in range(min(room.get("doors", 0), 3)):
-            dx = x + 10 + d * 20
-            dy = y + h - 12
-            svg_parts.append(f'<line x1="{dx}" y1="{dy}" x2="{dx+15}" y2="{dy}" stroke="#f39c12" stroke-width="3"/>')
-            svg_parts.append(f'<path d="M{dx+15},{dy} A12,12 0 0,0 {dx+3},{dy-10}" fill="none" stroke="#f39c12" stroke-width="1.5"/>')
+        if room.get("doors", 0) > 0:
+            for d in range(min(room["doors"], 3)):
+                dx = x + 10 + d * 20
+                dy = y + h - 12
+                svg_parts.append(f'<line x1="{dx}" y1="{dy}" x2="{dx+15}" y2="{dy}" stroke="#f39c12" stroke-width="3"/>')
+                svg_parts.append(f'<path d="M{dx+15},{dy} A12,12 0 0,0 {dx+3},{dy-10}" fill="none" stroke="#f39c12" stroke-width="1.5"/>')
         
-        # Окна
-        for wnd in range(min(room.get("windows", 0), 3)):
-            wx = x + w - 30 - wnd * 25
-            wy = y + 12
-            svg_parts.append(f'<rect x="{wx}" y="{wy}" width="20" height="10" fill="#a8d8ea" stroke="#2c3e50" stroke-width="1.5" rx="1"/>')
-            svg_parts.append(f'<line x1="{wx+10}" y1="{wy}" x2="{wx+10}" y2="{wy+10}" stroke="#2c3e50" stroke-width="1"/>')
+        if room.get("windows", 0) > 0:
+            for wnd in range(min(room["windows"], 3)):
+                wx = x + w - 30 - wnd * 25
+                wy = y + 12
+                svg_parts.append(f'<rect x="{wx}" y="{wy}" width="20" height="10" fill="#a8d8ea" stroke="#2c3e50" stroke-width="1.5" rx="1"/>')
+                svg_parts.append(f'<line x1="{wx+10}" y1="{wy}" x2="{wx+10}" y2="{wy+10}" stroke="#2c3e50" stroke-width="1"/>')
         
-        # Оборудование
         icon_x = x + 8
         icon_y = y + 65
         for sys in ["video", "skud", "security", "fire", "soue"]:
@@ -538,7 +702,6 @@ def generate_svg(rooms, details):
                         icon_y = y + 65
                         icon_x += 100
     
-    # Легенда
     legend_x = margin
     legend_y = svg_h - 60
     svg_parts.append(f'<rect x="{legend_x}" y="{legend_y}" width="380" height="50" fill="#ffffff" stroke="#d0d7de" stroke-width="1" rx="4"/>')
@@ -561,14 +724,13 @@ def generate_svg(rooms, details):
     return "\n".join(svg_parts)
 
 # ------------------------------------------------------------
-# 10. ГЕНЕРАЦИЯ ДОКУМЕНТОВ (обновлённая)
+# 12. ГЕНЕРАЦИЯ ДОКУМЕНТОВ
 # ------------------------------------------------------------
 def generate_document(scenario, rooms, total_equip, room_details, svg_code):
     rooms_desc = ", ".join([f"{r['name']} ({r['length']}×{r['width']} м, эт.{r['floor']})" for r in rooms])
     total_area = sum(r["area"] for r in rooms)
     
     if scenario == "info":
-        # Формируем детальное описание помещений для промпта
         rooms_details_for_prompt = ""
         for room in rooms:
             rooms_details_for_prompt += f"""
@@ -600,25 +762,12 @@ def generate_document(scenario, rooms, total_equip, room_details, svg_code):
 Для КАЖДОГО помещения выполни классификацию по зонам:
 
 **Зона 0 (минимальная ценность)**: санузлы, душевые, подсобные помещения, кладовые, технические комнаты.
-Требования: пожарная сигнализация — только в подсобных/кладовых (по СП 484), в санузлах и душевых — НИЧЕГО не требуется.
-
-**Зона 1 (клиентская / общедоступная)**: операционные залы, вестибюли, коридоры, холлы, столовые, буфеты, комнаты отдыха, лестничные клетки.
-Требования: пожарная сигнализация (по СП 484), видеонаблюдение (рекомендуется), СКУД и охранная сигнализация — НЕ ТРЕБУЮТСЯ.
-
-**Зона 2 (офисная / ограниченного доступа)**: кабинеты, ИТ-отделы, переговорные, комнаты персонала, архивы (без особой ценности).
-Требования: СКУД (карты), тревожная кнопка, видеонаблюдение, датчики открытия/движения, пожарная сигнализация.
-
-**Зона 3A (ЦОД / серверная)**: серверные, коммутационные, аппаратные.
-Требования: СКУД (двухфакторная: карта+PIN), многорубежная сигнализация, видео с высоким разрешением, пожарная сигнализация, газовое пожаротушение.
-
+**Зона 1 (клиентская / общедоступная)**: операционные залы, вестибюли, коридоры, холлы, столовые.
+**Зона 2 (офисная / ограниченного доступа)**: кабинеты, ИТ-отделы, переговорные.
+**Зона 3A (ЦОД / серверная)**: серверные, коммутационные.
 **Зона 3B (хранилище ценностей)**: сейфовые комнаты, депозитарии.
-Требования: СКУД (карта+биометрия), многорубежная сигнализация (вибрация, акустика), видео с распознаванием лиц, газовое пожаротушение, вывод на Росгвардию.
-
 **Зона 3C (кассовый узел)**: операционные кассы, кассовые комнаты.
-Требования: СКУД (карта+PIN), сигнализация, видео над каждым рабочим местом, пожарная сигнализация.
-
 **Зона 3D (служба безопасности)**: помещения охраны, пультовые.
-Требования: СКУД (двухфакторная), многорубежная сигнализация, видео с аналитикой, пожарная сигнализация, резервирование питания.
 
 Помещения:
 {rooms_details_for_prompt}
@@ -684,19 +833,19 @@ def generate_document(scenario, rooms, total_equip, room_details, svg_code):
     return "Неизвестный сценарий"
 
 # ------------------------------------------------------------
-# 11. ОБРАБОТКА КНОПОК
+# 13. ОБРАБОТКА КНОПОК
 # ------------------------------------------------------------
 if not st.session_state.rooms:
     st.warning("⚠️ Добавьте хотя бы одно помещение для расчёта.")
 else:
     scenario = None
-    if btn_info:
+    if 'btn_info' in locals() and btn_info:
         scenario = "info"
-    elif btn_estimate:
+    elif 'btn_estimate' in locals() and btn_estimate:
         scenario = "estimate"
-    elif btn_rd:
+    elif 'btn_rd' in locals() and btn_rd:
         scenario = "rd"
-    elif btn_application:
+    elif 'btn_application' in locals() and btn_application:
         scenario = "application"
     
     if scenario:
@@ -715,17 +864,15 @@ else:
             st.rerun()
 
 # ------------------------------------------------------------
-# 12. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ (как в V2 — через markdown)
+# 14. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
 # ------------------------------------------------------------
 if st.session_state.calc_result:
     res = st.session_state.calc_result
     st.markdown("---")
     st.subheader(f"📄 Результат: {res['scenario']}")
     
-    # --- Вывод документа через markdown (сохраняет форматирование) ---
     st.markdown(res["document"])
     
-    # --- SVG (если есть) ---
     if res.get("svg"):
         st.markdown("---")
         st.subheader("🖼️ Схема расстановки оборудования")
@@ -734,8 +881,11 @@ if st.session_state.calc_result:
         st.markdown(f'<a href="data:image/svg+xml;base64,{b64}" download="scheme.svg">📥 Скачать SVG</a>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 13. ПРИМЕЧАНИЕ
+# 15. ПРИМЕЧАНИЕ
 # ------------------------------------------------------------
 st.caption("""
-Прототип V3 — объединяет лучшие черты V2 (интерфейс, логика) и V3 (экспликация, нормативы, SVG).
+SecurLLM V3 — ML-распознавание чертежей через GigaChat Vision.
+- Загрузите чертёж (PNG, JPG) для автоматического заполнения.
+- Данные можно корректировать вручную.
+- Выберите сценарий: Справка, Смета, Рабочая документация, Заявка.
 """)
